@@ -195,3 +195,16 @@ def test_fastscan_c_exact(small):
                 np.testing.assert_allclose(bd[i], np.sort(rd), rtol=1e-4)
                 np.testing.assert_allclose(vd[i], np.sort(rd), rtol=1e-4)
                 assert bn[i] == nbf and ns[i] == nbf and nr[i] <= nbf
+
+
+def test_pcava_exact(small):
+    from fknn.exact_pcava import PCAVABound
+    ds, li = small
+    pv = PCAVABound(ds.X, m=6)
+    for mode in MODES:
+        for s in (0.01, 0.2):
+            for q, P in make_queries(ds, 8, mode, s, seed=14):
+                ids = li.ids(P)
+                _, gd, _ = pv.search(q, ids, 10)
+                _, rd, _ = bruteforce_knn(ds.X, q, ids, 10)
+                np.testing.assert_allclose(np.sort(gd), np.sort(rd), rtol=1e-4)

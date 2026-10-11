@@ -205,3 +205,34 @@ What this shows:
   the regime targeted by Curator (arXiv:2601.01291) and RACORN-1 — active, crowded.
 * **Negative correlation** (out-of-distribution w.r.t. the allowed subset): all graph
   methods fail. Exact or partition-based methods are the only reliable option today.
+
+## Cycle 5 — exact filtered search faster than brute force (where graphs fail)
+
+Motivation: Experiments 1–4 show that below ~1% selectivity and under negative
+correlation every graph method misses recall 0.95 and brute force (BF) is the only
+reliable method. BF is the fallback in every vector DB. Goal: exact answers, less work.
+
+Hypotheses tested (all methods exact; tests in `tests/test_correctness.py`):
+| id | idea | result | verdict |
+|---|---|---|---|
+| H5.1 | PCA m-dim lower bound + Seidl–Kriegel multi-step (`fknn/exact_lb.py`) | Fashion 3–12× fewer multiply-adds; GloVe 0.74–1.04× (flat spectrum: 32 PCs = 49% variance) | works only for fast-decaying spectra |
+| H5.2 | + residual-norm term (r(q)−r(x))² | +3–7% fewer ops | small, free |
+| H5.6 | local (per-cluster) PCA | no robust gain (apparent GloVe gain is a small-sample artefact; Fashion worse) | rejected |
+| H5.7 | 4-bit per-dimension VA codes, exact LB via table lookups, table rounded **down** to uint8 (keeps exactness) (`fknn/exact_va.py`) | refine only 1.5–30% of allowed points on GloVe *and* Fashion; PCA rotation hurts | **works on both spectra** |
+| H5.5 | C/AVX2 fast-scan kernel (`fknn/c/fscan.c`), per-label contiguous code blocks, vs the strongest BF (contiguous label-sorted floats) | see table | **confirmed (real time)** |
+
+Experiment 5 — single-thread wall time, exact results verified on every query
+(`experiments/exp5_exact_scan.py`, `results/exp5/`). Speedup = total BF time ÷ total VA time:
+
+| dataset | all queries | s<1% | 1–10% | ≥10% |
+|---|---|---|---|---|
+| Fashion-MNIST (60k×784) | **7.2×** | 2.3× | 5.8× | 8.7× |
+| GloVe (198k×100) | **3.4×** | 0.97× | 2.4× | 4.0× |
+| synthetic separated (100k×64) | 1.9× | 0.73× | 1.2× | 2.0× |
+| synthetic overlap (100k×64) | 2.3× | 0.87× | 1.6× | 2.5× |
+
+Caveats: this CPU has a 260 MB L3 cache, so every dataset is cache-resident; BF is
+then compute-bound, which *favours BF* (VA reads 8× fewer bytes). At s<1% with small
+d, the fixed cost of building the lookup table loses to BF → use BF there (simple rule).
+Prior art: VA-file (1998), VA+-file (2000), FAISS fast-scan (2019+), multi-step k-NN
+(1998). The combination for exact *filtered* search is engineering, not a new theory.
