@@ -323,3 +323,95 @@ void va3_batch(const float *Xs, int d, int bits, const uint8_t *codes, const int
     }
     free(tA); free(tB); free(T);
 }
+
+/* ---------------------------------------------------------------------------------
+ * v4 = v3 + streaming refinement + block early-abandon.
+ * Dimensions are pre-permuted by decreasing variance (codes4/edges4 in that order;
+ * Qp = queries permuted the same way, used only to build the table; exact distances
+ * use the original Xs and Q). Blocks are processed in order; after each block, lanes
+ * whose bound is below the current k-th exact distance t are refined immediately, so t
+ * tightens early. Every CHK dims the block's partial bounds are checked: if all 64
+ * lanes already have partial bound >= t, the block is abandoned (partial <= full bound,
+ * so this is exact).
+ * ------------------------------------------------------------------------------- */
+#define CHK 32
+void va4_batch(const float *Xs, int d, int bits, const uint8_t *codes, const int64_t *slot_row, const int64_t *lblock,
+               const float *edges_lo, const float *edges_hi,
+               const float *Q, const float *Qp, int nq, const int64_t *qlab, const int64_t *qoff, int k,
+               int64_t *out_id, float *out_d, double *t_ns, int64_t *n_refined, int64_t *n_dims_scanned) {
+    const int C = 1 << bits, b7 = bits == 7;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *T = malloc(sizeof(float) * d * C);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d, *qp = Qp + (int64_t)qi * d;
+        double t0 = now_ns();
+        __m512 vmax = _mm512_setzero_ps();
+        const __m512 zero = _mm512_setzero_ps();
+        for (int i = 0; i < d; i++) {
+            const __m512 vq = _mm512_set1_ps(qp[i]);
+            for (int c = 0; c < C; c += 16) {
+                __m512 g = _mm512_max_ps(_mm512_max_ps(_mm512_sub_ps(_mm512_loadu_ps(edges_lo + (int64_t)i * C + c), vq),
+                                                       _mm512_sub_ps(vq, _mm512_loadu_ps(edges_hi + (int64_t)i * C + c))), zero);
+                g = _mm512_mul_ps(g, g);
+                _mm512_storeu_ps(T + (int64_t)i * C + c, g);
+                vmax = _mm512_max_ps(vmax, g);
+            }
+        }
+        float tmax = _mm512_reduce_max_ps(vmax);
+        float scale = tmax > 0 ? tmax / 255.f : 1.f, inv = 1.f / scale;
+        const __m512 vinv = _mm512_set1_ps(inv), v255 = _mm512_set1_ps(255.f);
+        for (int i = 0; i < d; i++) {
+            uint8_t row[128] __attribute__((aligned(64))) = {0};
+            const float *Ti = T + (int64_t)i * C;
+            for (int c = 0; c < C; c += 16) {
+                __m512 v = _mm512_min_ps(_mm512_roundscale_ps(_mm512_mul_ps(_mm512_loadu_ps(Ti + c), vinv), _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC), v255);
+                _mm_storeu_si128((__m128i *)(row + c), _mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
+            }
+            if (C < 64) for (int c = C; c < 64; c++) row[c] = row[c % C];
+            tA[i] = _mm512_load_si512(row);
+            tB[i] = _mm512_load_si512(row + 64);
+        }
+        topk_t tk; tk_init(&tk, k);
+        int64_t refined = 0, dims = 0;
+        const __m512i z = _mm512_setzero_si512();
+        for (int64_t a = qoff[qi]; a < qoff[qi + 1]; a++) {
+            int64_t l = qlab[a];
+            for (int64_t b = lblock[l]; b < lblock[l + 1]; b++) {
+                const uint8_t *blk = codes + b * (int64_t)d * 64;
+                __m512i acc_lo = z, acc_hi = z;
+                float t = tk_worst(&tk);
+                /* threshold in table units (bound*scale >= t  <=>  bound >= t/scale) */
+                uint32_t tq = t == INFINITY ? 0xFFFFFFFFu : (uint32_t)fminf(t * inv, 65535.f);
+                int abandoned = 0, i = 0;
+                for (; i < d; i++) {
+                    __m512i c = _mm512_loadu_si512(blk + (int64_t)i * 64);
+                    __m512i v = b7 ? _mm512_permutex2var_epi8(tA[i], c, tB[i]) : _mm512_permutexvar_epi8(c, tA[i]);
+                    acc_lo = _mm512_adds_epu16(acc_lo, _mm512_unpacklo_epi8(v, z));
+                    acc_hi = _mm512_adds_epu16(acc_hi, _mm512_unpackhi_epi8(v, z));
+                    if (((i + 1) % CHK) == 0 && tq != 0xFFFFFFFFu && i + 1 < d) {
+                        __m512i mn = _mm512_min_epu16(acc_lo, acc_hi);
+                        /* all lanes >= tq ? (padding lanes are fine: they are skipped anyway) */
+                        if (_mm512_cmplt_epu16_mask(mn, _mm512_set1_epi16((short)tq)) == 0) { abandoned = 1; i++; break; }
+                    }
+                }
+                dims += abandoned ? i : d;
+                if (abandoned) continue;
+                uint16_t lo[32], hi[32], lb64[64];
+                _mm512_storeu_si512(lo, acc_lo);
+                _mm512_storeu_si512(hi, acc_hi);
+                for (int L = 0; L < 4; L++)
+                    for (int j = 0; j < 8; j++) { lb64[16 * L + j] = lo[8 * L + j]; lb64[16 * L + 8 + j] = hi[8 * L + j]; }
+                for (int j = 0; j < 64; j++) {
+                    int64_t s = b * 64 + j, r = slot_row[s];
+                    if (r < 0) continue;
+                    if ((float)lb64[j] * scale >= tk_worst(&tk)) continue;
+                    tk_push(&tk, l2(Xs + r * d, q, d), r); refined++;
+                }
+            }
+        }
+        t_ns[qi] = now_ns() - t0;
+        n_refined[qi] = refined; n_dims_scanned[qi] = dims;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+    free(tA); free(tB); free(T);
+}

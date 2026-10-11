@@ -198,6 +198,8 @@ def test_fastscan_c_exact(small):
                 fs3 = fs if b3 == 6 else fs_bits[b3]
                 _, vd3, _, nr3, ns3 = fs3.va3(Q, Ps)
                 np.testing.assert_allclose(vd3, bd, rtol=1e-4)
+                _, vd4, _, _, _ = fs3.va4(Q, Ps)
+                np.testing.assert_allclose(vd4, bd, rtol=1e-4)
                 assert np.all(ns3 == ns)
             for i, (q, P) in enumerate(qs):
                 _, rd, nbf = bruteforce_knn(ds.X, q, li.ids(P), 10)
@@ -217,3 +219,22 @@ def test_pcava_exact(small):
                 _, gd, _ = pv.search(q, ids, 10)
                 _, rd, _ = bruteforce_knn(ds.X, q, ids, 10)
                 np.testing.assert_allclose(np.sort(gd), np.sort(rd), rtol=1e-4)
+
+
+def test_va4_early_abandon_exact_high_dim():
+    """d=96 so the every-32-dims abandon check actually fires."""
+    from fknn.fastscan import FastScanIndex
+    ds = make_dataset(n_clusters=12, per_cluster=600, dim=96, labels_per_cluster=10, seed=3)
+    li = LabelIndex(ds.labels, ds.n_labels)
+    fs = FastScanIndex(ds.X, ds.labels, ds.n_labels, bits3=6)
+    for mode in MODES:
+        for s in (0.02, 0.3, 1.0):
+            qs = make_queries(ds, 12, mode, s, seed=23)
+            Q = np.stack([q for q, _ in qs]); Ps = [P for _, P in qs]
+            _, bd, _, nb = fs.bf(Q, Ps)
+            _, vd4, _, _, ndims = fs.va4(Q, Ps)
+            np.testing.assert_allclose(vd4, bd, rtol=1e-4)
+            for i, (q, P) in enumerate(qs):
+                _, rd, _ = bruteforce_knn(ds.X, q, li.ids(P), 10)
+                np.testing.assert_allclose(vd4[i], np.sort(rd), rtol=1e-4)
+    assert ndims.sum() < len(qs) * 96 * ((nb.max() + 63) // 64) * 2  # sanity: counter is populated

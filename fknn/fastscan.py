@@ -82,6 +82,11 @@ class FastScanIndex:
                 s0 = self.lblock2[l] * 64
                 codes3[s0:s0 + (b - a)] = c3[a:b]
         self.codes3 = np.ascontiguousarray(codes3.reshape(nb2, 64, d).transpose(0, 2, 1))
+        # v4: same codes with dimensions permuted by decreasing variance
+        self.perm = np.argsort(-X.var(0)).astype(np.int64)
+        self.codes4 = np.ascontiguousarray(self.codes3[:, self.perm, :])
+        self.edges4_lo = np.ascontiguousarray(self.edges3_lo[self.perm])
+        self.edges4_hi = np.ascontiguousarray(self.edges3_hi[self.perm])
         self.nslots = max(self.nslots, nb2 * 64)
         self.lb_buf = np.empty(self.nslots, dtype=np.uint16)
         self.slot_buf = np.empty(self.nslots, dtype=np.int64)
@@ -122,6 +127,18 @@ class FastScanIndex:
                        _p(self.lblock2), _p(self.edges3_lo), _p(self.edges3_hi), _p(Q), ctypes.c_int(nq), _p(qlab),
                        _p(qoff), ctypes.c_int(k), _p(oid), _p(od), _p(t), _p(nr), _p(ns), _p(self.lb_buf), _p(self.slot_buf))
         return self.row_to_id[np.maximum(oid, 0)], od, t, nr, ns
+
+    def va4(self, Q, label_sets, k=10):
+        """v3 + variance-ordered dims, streaming refinement, block early-abandon (exact)."""
+        Q, qlab, qoff = self._qarrays(Q, label_sets)
+        Qp = np.ascontiguousarray(Q[:, self.perm])
+        nq = len(Q)
+        oid = np.empty((nq, k), np.int64); od = np.empty((nq, k), np.float32)
+        t = np.empty(nq); nr = np.empty(nq, np.int64); nd = np.empty(nq, np.int64)
+        _lib.va4_batch(_p(self.Xs), ctypes.c_int(self.d), ctypes.c_int(self.bits3), _p(self.codes4), _p(self.slot_row2),
+                       _p(self.lblock2), _p(self.edges4_lo), _p(self.edges4_hi), _p(Q), _p(Qp), ctypes.c_int(nq),
+                       _p(qlab), _p(qoff), ctypes.c_int(k), _p(oid), _p(od), _p(t), _p(nr), _p(nd))
+        return self.row_to_id[np.maximum(oid, 0)], od, t, nr, nd
 
     def va2(self, Q, label_sets, k=10):
         """AVX-512 kernel, 64-slot blocks, 6-bit table with 4-dim uint8 pre-accumulation."""

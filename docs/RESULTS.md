@@ -282,3 +282,54 @@ GloVe/spaCy and loses 3.8× on Fashion. Caveats: VA3 is linear in the allowed se
 much larger n and high selectivity graphs win more; ACORN was not re-tuned per dataset
 (paper defaults); all data except spaCy/synth-1M are cache-resident; ACORN build takes
 minutes and much more memory than VA3 codes (d bytes per vector).
+
+## Cycle 7 — prior art, PDX, hybrid planner, early abandon
+
+### Prior-art check (literature agent, 2026-10-11; arxiv/vldb pages were not reachable, so partly from abstracts)
+* **Prior art:** PQ Fast Scan (VLDB'16) — quantized-LUT lower bounds with saturating SIMD adds and
+  heap-bound pruning (exact w.r.t. PQ distance, not true L2); Quicker ADC (TPAMI'19) — AVX-512 VBMI
+  `vpermi2b` LUT scans; VA-file / VA+-file; PDX / PDX-BOND (SIGMOD'25) — exact pruned scans beating
+  SIMD brute force; Curator / ACORN / RACORN-1 — brute force wins at low selectivity; Vespa (5%),
+  Weaviate (~15%) switch to exact search below a selectivity threshold.
+* **Not found** (absence of evidence ≠ proof): exact filtered k-NN with *true-L2* deterministic
+  bounds from floor-rounded LUTs + byte-permute SIMD + per-label contiguous code blocks; `vpermb`
+  on 6-bit per-dimension scalar codes.
+* **Consequence:** "exact beats ACORN at low selectivity" is *not* new by itself (pre-filter BF is
+  known to win there). The defensible claim is: **exact filtered search 4–9× faster than
+  contiguous exact brute force**, competitive with the best exact pruned scan (PDX).
+
+### Experiment 11 — VA3 vs PDX filtered search (`results/exp11`)
+| dataset | VA3 exact | PDX exhaustive (recall) | PDX nprobe 32 (recall) |
+|---|---|---|---|
+| Fashion | **246 µs** | 464 µs (0.985) | 269 µs (0.69) |
+| GloVe | **181 µs** | 1 695 µs (0.996) | 243 µs (0.60) |
+| spaCy | **870 µs** | 3 648 µs (0.995) | 906 µs (0.63) |
+| synthetic 1M | **2 021 µs** | 8 020 µs (0.999) | 1 528 µs (0.34) |
+Part of this gap is the filter-aware layout (PDX takes an arbitrary row-id list).
+
+### Experiment 12 — no filter, kernel vs kernel (`results/exp12`)
+| dataset | BF | VA3 | VA4 (early abandon) | PDX exhaustive (recall) |
+|---|---|---|---|---|
+| Fashion (d=784) | 38.7 ms | 2.21 ms | 1.34 ms | **0.67–1.17 ms** (0.992) |
+| GloVe | 8.9 ms | 1.63 ms | **1.04 ms** | 3.25 ms (1.0) |
+| spaCy | 85.3 ms | 8.30 ms | **7.46 ms** | 9.24 ms (1.0) |
+PDX timings varied ~1.7× between runs on Fashion. Kernels are comparable; PDX wins on the
+784-d image data (dimension pruning), VA wins on the word-vector data.
+
+### Experiment 10 — hybrid planner (`results/exp10`): VA3 below a selectivity threshold, ACORN-γ above
+Tuned on even queries (target mean recall 0.95), evaluated on odd queries:
+| dataset | BF | VA3 (exact) | ACORN-γ alone | hybrid (recall) |
+|---|---|---|---|---|
+| Fashion | 2 462 µs | 281 µs | cannot reach 0.95 | **82 µs** (0.946) |
+| GloVe | 656 µs | 171 µs | cannot reach 0.95 | **56 µs** (0.934) |
+| spaCy | 6 733 µs | 884 µs | cannot reach 0.95 | **393 µs** (0.958) |
+ACORN-γ alone never reaches mean recall 0.95 on a mixed-selectivity workload (low-selectivity
+queries sink it). The hybrid is 2.2–3.4× faster than exact VA3, but its held-out recall fell
+slightly below target on 2 of 3 datasets — threshold tuning does not transfer perfectly.
+ACORN-γ itself varied between rebuilds (Fashion 1–10%: 292 µs vs 1 500 µs at 0.95).
+
+### Experiment 13 — VA4 (variance-ordered dims, streaming refine, block early-abandon), filtered
+Speedup over BF, all queries: Fashion 8.9×, GloVe **5.1×** (VA3: 4.0×), spaCy 6.0× (VA3: 7.1×),
+synthetic 1M 6.6× (VA3: 6.3×). Mixed: better on GloVe and at high selectivity, worse at s<1% and
+on spaCy (streaming refinement starts with a loose threshold). Rule of thumb: VA3 for small
+allowed sets, VA4 for large.
