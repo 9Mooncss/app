@@ -1,0 +1,12 @@
+[spacy/all] n=600 BF 6806us  VA 2024us  speedup(total) 3.36x  median-query 1.89x  VA slower on 20%  refined 0.097
+[spacy/s<1%] n=225 BF 304us  VA 259us  speedup(total) 1.17x  median-query 0.99x  VA slower on 52%  refined 0.541
+[spacy/1%<=s<10%] n=211 BF 3190us  VA 1321us  speedup(total) 2.42x  median-query 2.41x  VA slower on 0%  refined 0.177
+[spacy/s>=10%] n=164 BF 20380us  VA 5349us  speedup(total) 3.81x  median-query 5.15x  VA slower on 0%  refined 0.072
+[synth_big/all] n=600 BF 12302us  VA 3743us  speedup(total) 3.29x  median-query 1.61x  VA slower on 22%  refined 0.040
+[synth_big/s<1%] n=217 BF 334us  VA 285us  speedup(total) 1.17x  median-query 0.94x  VA slower on 59%  refined 0.370
+[synth_big/1%<=s<10%] n=183 BF 2980us  VA 1550us  speedup(total) 1.92x  median-query 1.58x  VA slower on 3%  refined 0.141
+[synth_big/s>=10%] n=200 BF 33816us  VA 9503us  speedup(total) 3.56x  median-query 3.96x  VA slower on 0%  refined 0.028
+[synth_big/positive] n=150 BF 12243us  VA 2727us  speedup(total) 4.49x  median-query 2.13x  VA slower on 21%  refined 0.018
+[synth_big/neutral] n=150 BF 12359us  VA 2742us  speedup(total) 4.51x  median-query 2.38x  VA slower on 15%  refined 0.012
+[synth_big/negative] n=150 BF 12259us  VA 4795us  speedup(total) 2.56x  median-query 1.41x  VA slower on 29%  refined 0.068
+[synth_big/mixed] n=150 BF 12344us  VA 4709us  speedup(total) 2.62x  median-query 1.49x  VA slower on 23%  refined 0.062
