@@ -236,3 +236,49 @@ then compute-bound, which *favours BF* (VA reads 8× fewer bytes). At s<1% with 
 d, the fixed cost of building the lookup table loses to BF → use BF there (simple rule).
 Prior art: VA-file (1998), VA+-file (2000), FAISS fast-scan (2019+), multi-step k-NN
 (1998). The combination for exact *filtered* search is engineering, not a new theory.
+
+## Cycle 6 — real competitors, scale, and kernel iterations
+
+### Competitors (all single thread, same queries, same machine)
+* **ACORN** — the official C++ implementation (stanford-futuredata/ACORN, SIGMOD'24),
+  built from source; harness `bench/acorn_bench.cpp`, driver `experiments/exp7_vs_acorn.py`.
+  ACORN-γ (M=32, γ=12, M_β=64; the paper's low-selectivity setting) and ACORN-1.
+* **FAISS 1.15 HNSW** with a native bitmap `IDSelector` (`experiments/exp6_vs_faiss.py`).
+  Its filtered search caps graph expansion, so recall stays low (≤0.73 on Fashion even at
+  ef=1024): it is a weak baseline here and is not used for conclusions.
+
+### Kernel iterations (exact results verified on every query)
+| kernel | idea | outcome |
+|---|---|---|
+| v1 | 4-bit codes, AVX2 `pshufb`, 8-bit table | 2–9× over BF; loses at s<1% |
+| v2 | AVX-512, 6-bit *table*, 4 dims pre-summed in uint8 | **slower**: coarser table → 1.5–3× more refinement; refinement, not scanning, dominated (my estimate was wrong) |
+| H5.8 | PCA top-m dims + residual-norm term | rejected (Fashion refines 12–14% vs 2.6%; flat spectra can't drop dims) |
+| **v3** | **6-bit codes via AVX-512 VBMI `vpermb` (64-entry LUT, 64 lookups/instr)**, 8-bit table rounded down, table build vectorized (14.7 µs vs 130 µs for d=784) | **best**: refinement 5–20× lower than v1 |
+| v3-7bit | `vpermi2b`, 128-entry LUT | no further gain (table cost) |
+
+### Experiment 9 — VA3 (6-bit) vs strongest brute force, exact, single thread
+(`results/exp9/summary.json`; speedup = total BF time / total VA3 time)
+| dataset | n × d | all | s<1% | 1–10% | ≥10% |
+|---|---|---|---|---|---|
+| Fashion-MNIST | 60k × 784 | **8.8×** | 3.4× | 8.0× | 9.8× |
+| GloVe | 198k × 100 | **4.0×** | 1.7× | 3.7× | 4.2× |
+| spaCy (out of cache, 409 MB) | 341k × 300 | **7.1×** | 2.5× | 5.6× | 7.9× |
+| synthetic (out of cache, 512 MB) | 1M × 128 | **6.3×** | 3.5× | 5.1× | 6.5× |
+| synthetic separated | 100k × 64 | 2.6× | 1.2× | 2.1× | 2.7× |
+| synthetic overlap | 100k × 64 | 2.8× | 1.2× | 2.4× | 2.9× |
+
+### Exact VA3 vs ACORN-γ (approximate) — `results/summary_vs_acorn.md`, `.png`
+Mean µs/query; ACORN-γ at the smallest ef reaching mean recall ≥ 0.95:
+| dataset | s<1% | 1–10% | ≥10% |
+|---|---|---|---|
+| Fashion | VA3 53 · ACORN never | VA3 **162** · ACORN 292 | VA3 775 · ACORN **202** |
+| GloVe | VA3 21 · ACORN never | VA3 **99** · ACORN 696 | VA3 536 · ACORN 576 |
+| spaCy | VA3 124 · ACORN never | VA3 **589** · ACORN 2 696 | VA3 2 663 · ACORN 2 589 |
+| synthetic ×2 | ACORN never reaches 0.95 in any band | | |
+
+Reading: **below 10% selectivity, exact VA3 is faster than ACORN-γ even when ACORN is
+allowed 5% errors** (1.8–7× where ACORN reaches 0.95 at all). At ≥10% it ties on
+GloVe/spaCy and loses 3.8× on Fashion. Caveats: VA3 is linear in the allowed set, so at
+much larger n and high selectivity graphs win more; ACORN was not re-tuned per dataset
+(paper defaults); all data except spaCy/synth-1M are cache-resident; ACORN build takes
+minutes and much more memory than VA3 codes (d bytes per vector).

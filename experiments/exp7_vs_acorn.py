@@ -73,6 +73,8 @@ def main():
                 continue
             build = p.stderr.split("build ")[1].split("s")[0]
             rows = list(csv.DictReader(open(out_csv)))
+            os.makedirs("results/exp7_perquery", exist_ok=True)
+            subprocess.run(["gzip", "-c", out_csv], stdout=open(f"results/exp7_perquery/{name}_{var}.csv.gz", "wb"))
             T = {ef: np.zeros(len(qs)) for ef in EFS}; R = {ef: np.zeros(len(qs)) for ef in EFS}
             for r in rows:
                 T[int(r["ef"])][int(r["query"])] = float(r["time_us"])
