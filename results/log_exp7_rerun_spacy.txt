@@ -1,0 +1,4 @@
+[spacy/all] n=600 BF 7068us | VA exact 1905us | ACORN-gamma@0.95 never | curve ef16:88us/r0.45 ef32:203us/r0.59 ef64:548us/r0.68 ef128:1142us/r0.75 ef256:2399us/r0.79 ef512:4673us/r0.81
+[spacy/s<1%] n=225 BF 315us | VA exact 247us | ACORN-gamma@0.95 never | curve ef16:56us/r0.16 ef32:113us/r0.26 ef64:350us/r0.36 ef128:798us/r0.45 ef256:1758us/r0.51 ef512:3248us/r0.54
+[spacy/1%<=s<10%] n=211 BF 3315us | VA exact 1274us | ACORN-gamma@0.95 2876us | curve ef16:103us/r0.60 ef32:241us/r0.77 ef64:651us/r0.86 ef128:1373us/r0.92 ef256:2876us/r0.95 ef512:5687us/r0.97
+[spacy/s>=10%] n=164 BF 21160us | VA exact 4993us | ACORN-gamma@0.95 2663us | curve ef16:113us/r0.65 ef32:278us/r0.80 ef64:685us/r0.88 ef128:1316us/r0.94 ef256:2663us/r0.96 ef512:5325us/r0.98

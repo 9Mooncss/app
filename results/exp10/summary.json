@@ -1,0 +1,68 @@
+{
+  "fashion": {
+    "n_test": 300,
+    "BF_exact": {
+      "mean_us": 2462.13257,
+      "recall": 1.0
+    },
+    "VA3_exact": {
+      "mean_us": 281.0710666666667,
+      "recall": 1.0
+    },
+    "ACORN_gamma_only": {
+      "note": "no ef reaches mean recall 0.95 on dev"
+    },
+    "hybrid": {
+      "threshold_s": 0.01925333333333333,
+      "ef": 16,
+      "mean_us": 81.88196333333333,
+      "recall": 0.9459999999999998,
+      "p10_recall": 0.8900000000000002,
+      "frac_to_VA3": 0.38666666666666666
+    }
+  },
+  "glove": {
+    "n_test": 300,
+    "BF_exact": {
+      "mean_us": 656.1707299999999,
+      "recall": 1.0
+    },
+    "VA3_exact": {
+      "mean_us": 170.52392,
+      "recall": 1.0
+    },
+    "ACORN_gamma_only": {
+      "note": "no ef reaches mean recall 0.95 on dev"
+    },
+    "hybrid": {
+      "threshold_s": 0.1115,
+      "ef": 16,
+      "mean_us": 55.95637,
+      "recall": 0.9343333333333331,
+      "p10_recall": 0.8,
+      "frac_to_VA3": 0.7433333333333333
+    }
+  },
+  "spacy": {
+    "n_test": 300,
+    "BF_exact": {
+      "mean_us": 6732.59243,
+      "recall": 1.0
+    },
+    "VA3_exact": {
+      "mean_us": 883.5219000000001,
+      "recall": 1.0
+    },
+    "ACORN_gamma_only": {
+      "note": "no ef reaches mean recall 0.95 on dev"
+    },
+    "hybrid": {
+      "threshold_s": 0.05934183586668933,
+      "ef": 64,
+      "mean_us": 393.48315333333335,
+      "recall": 0.9583333333333334,
+      "p10_recall": 0.9,
+      "frac_to_VA3": 0.6533333333333333
+    }
+  }
+}
