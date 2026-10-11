@@ -11,12 +11,16 @@ Model:
       positive: labels from clusters nearest to q   (allowed points near q)
       neutral:  labels sampled uniformly at random  (allowed points everywhere)
       negative: labels from clusters farthest from q (allowed points far from q)
+      mixed:    labels from a random window of the distance-ranked clusters
+                (allowed points at a random distance; a continuum between the
+                three modes above, used only as an out-of-distribution test)
 """
 from dataclasses import dataclass
 
 import numpy as np
 
 MODES = ("positive", "neutral", "negative")
+ALL_MODES = MODES + ("mixed",)
 
 
 @dataclass
@@ -59,7 +63,7 @@ def _labels_from_cluster_order(ds: Dataset, order: np.ndarray, m: int, rng) -> n
 
 def make_queries(ds: Dataset, n_queries: int, mode: str, selectivity: float, seed: int):
     """Return list of (q, allowed_labels). Filters with |P| = round(s * n_labels)."""
-    if mode not in MODES:
+    if mode not in ALL_MODES:
         raise ValueError(mode)
     rng = np.random.default_rng(seed)
     m = max(1, int(round(selectivity * ds.n_labels)))
@@ -75,6 +79,10 @@ def make_queries(ds: Dataset, n_queries: int, mode: str, selectivity: float, see
             order = np.argsort(dc)
             if mode == "negative":
                 order = order[::-1]
+            elif mode == "mixed":
+                n_cl = -(-m // ds.labels_per_cluster)
+                start = rng.integers(0, len(order) - n_cl + 1)
+                order = order[start:]
             P = _labels_from_cluster_order(ds, order, m, rng)
         out.append((q, P))
     return out

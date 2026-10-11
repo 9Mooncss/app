@@ -79,3 +79,61 @@ def test_replica_matches_hnswlib(small, hnsw, filtered):
         total += 10
     # float32 rounding in SIMD vs numpy can flip rare ties; demand near-identity
     assert agree / total >= 0.99
+
+
+def test_mixed_mode_between_extremes(small):
+    ds, li = small
+    md = {m: np.mean([((ds.X[li.ids(P)] - q) ** 2).sum(1).mean()
+                      for q, P in make_queries(ds, 40, m, 0.1, seed=4)])
+          for m in ("positive", "mixed", "negative")}
+    assert md["positive"] < md["mixed"] < md["negative"]
+
+
+def test_local_selectivity_counts(small):
+    from fknn.planner import LocalSelectivity
+    ds, _ = small
+    est = LocalSelectivity(ds.X, ds.labels, ds.n_labels, n_centroids=8, seed=0, ms=(1, 8))
+    assign = est._assign(ds.X, est.C)
+    q, P = make_queries(ds, 1, "positive", 0.05, seed=2)[0]
+    f1, f8 = est.features(q, P)
+    near = np.argmin(((est.C - q) ** 2).sum(1))
+    in_c = assign == near
+    expect = np.isin(ds.labels[in_c], P).mean()
+    assert abs(f1 - np.log10(expect + 1e-4)) < 1e-9
+    assert abs(f8 - np.log10(np.isin(ds.labels, P).mean() + 1e-4)) < 1e-9  # all centroids = global s
+
+
+def test_fallback_derivation():
+    from fknn.planner import strategy_table
+    rows = [dict(n_allowed=100, cost_BF=100, cost_HNSW16=50, recall_HNSW16=0.5),
+            dict(n_allowed=100, cost_BF=100, cost_HNSW16=500, recall_HNSW16=1.0)]
+    names, c, r = strategy_table(rows, [16], True)
+    j = names.index("HNSW16fb1")
+    assert c[0, j] == 50 and r[0, j] == 0.5      # within budget: unchanged (silent failure kept)
+    assert c[1, j] == 200 and r[1, j] == 1.0     # overrun: budget + BF, exact
+
+
+def test_planner_learns_obvious_rule():
+    from fknn.planner import KNNPlanner
+    rng = np.random.default_rng(0)
+    F = rng.uniform(0, 1, size=(300, 1))
+    cost = np.stack([np.where(F[:, 0] < 0.5, 1.0, 10.0), np.where(F[:, 0] < 0.5, 10.0, 1.0)], 1)
+    rec = np.ones_like(cost)
+    pl = KNNPlanner().fit(F, cost, rec)
+    pick = pl.predict(np.array([[0.1], [0.9]]))
+    assert list(pick) == [0, 1]
+
+
+def test_ivf_exact_matches_bruteforce(small):
+    from fknn.ivf_exact import IVFExact
+    from fknn.planner import LocalSelectivity
+    ds, li = small
+    est = LocalSelectivity(ds.X, ds.labels, ds.n_labels, n_centroids=16, seed=0)
+    ivf = IVFExact(ds.X, ds.labels, ds.n_labels, est.C, est._assign(ds.X, est.C))
+    for mode in MODES:
+        for s in (0.01, 0.1, 0.5):
+            for q, P in make_queries(ds, 15, mode, s, seed=9):
+                ids, d2, nd, _ = ivf.search(q, P, 10)
+                ref, rd2, nbf = bruteforce_knn(ds.X, q, li.ids(P), 10)
+                np.testing.assert_allclose(np.sort(d2), np.sort(rd2), rtol=1e-4)
+                assert nd <= nbf + 16
