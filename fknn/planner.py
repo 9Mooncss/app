@@ -66,8 +66,9 @@ class LocalSelectivity:
 
 
 # ---------------------------------------------------------------- strategy table
-def strategy_table(rows, efs, with_fallback):
-    """Return names, cost matrix (n, S), recall matrix (n, S)."""
+def strategy_table(rows, efs, with_fallback, extra=()):
+    """Return names, cost matrix (n, S), recall matrix (n, S).
+    `extra`: additional strategy names with cost_<name>/recall_<name> columns."""
     names = ["BF"]
     cost = [np.array([r["cost_BF"] for r in rows], dtype=float)]
     rec = [np.ones(len(rows))]
@@ -85,6 +86,10 @@ def strategy_table(rows, efs, with_fallback):
                 names.append(f"HNSW{ef}fb{b:g}")
                 cost.append(np.where(over, budget + nb, c))
                 rec.append(np.where(over, 1.0, rr))
+    for name in extra:
+        names.append(name)
+        cost.append(np.array([r[f"cost_{name}"] for r in rows], dtype=float))
+        rec.append(np.array([r[f"recall_{name}"] for r in rows]))
     return names, np.stack(cost, 1), np.stack(rec, 1)
 
 

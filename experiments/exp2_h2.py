@@ -32,12 +32,16 @@ from fknn.hnsw_build import build  # noqa: E402
 from fknn.hnsw_replica import search  # noqa: E402
 from fknn.planner import (KNNPlanner, LocalSelectivity, evaluate, oracle_pick,  # noqa: E402
                           strategy_table)
+from fknn.ivf_exact import IVFExact  # noqa: E402
+from fknn.seeded import SeedPicker, seeded_2hop_search  # noqa: E402
 from fknn.realdata import load_fashion, load_glove, make_real_queries  # noqa: E402
 
 SELECTIVITIES = [0.001, 0.005, 0.01, 0.05, 0.2, 0.5]
 EFS = [16, 64, 256]
 K = 10
+S2H_EFS = [16, 64]
 G = {}
+EXTRA = []  # extra strategy names (set by --new-strategies)
 
 
 def run_query(task):
@@ -56,6 +60,16 @@ def run_query(task):
         row[f"recall_HNSW{ef}"] = len(exact & set(got.tolist())) / K
     for i, f in enumerate(est.features(q, P)):
         row[f"local{est.ms[i]}"] = f
+    if G.get("new"):
+        ivf, sp = G["ivf"], G["sp"]
+        _, _, nd, nb = ivf.search(q, P, K)
+        row.update(cost_IVFX=nd, recall_IVFX=1.0, bounds_IVFX=nb)
+        seeds, c0 = sp.seeds(q, P, 32, per_cluster=2)
+        for ef in S2H_EFS:
+            got, gd, nd, ne = seeded_2hop_search(g, Xint, q, K, ef, allowed_int, seeds)
+            row[f"cost_S2H{ef}"] = nd + c0
+            row[f"recall_S2H{ef}"] = len(exact & set(got.tolist())) / K
+            row[f"edges_S2H{ef}"] = ne
     return row
 
 
@@ -86,28 +100,37 @@ def features(rows, local):
     return np.array(F, dtype=float)
 
 
-PLANNERS = {"A_s_only": (False, False), "B_s_fallback": (False, True),
-            "C_local": (True, False), "D_local_fallback": (True, True)}
+# name -> (uses local features, may use fallback strategies, may use EXTRA strategies)
+PLANNERS = {"A_s_only": (False, False, True), "B_s_fallback": (False, True, True),
+            "C_local": (True, False, True), "D_local_fallback": (True, True, True)}
+# with --new-strategies, also keep the best planner of Experiment 2 as a reference
+REF_PLANNERS = {"B0_s_fallback_no_new": (False, True, False),
+                "D0_local_fallback_no_new": (True, True, False)}
 
 
 def analyze(dev, tests, overhead):
     out = {}
-    for pname, (local, fb) in PLANNERS.items():
-        names, cdev, rdev = strategy_table(dev, EFS, fb)
+    planners = dict(PLANNERS, **(REF_PLANNERS if EXTRA else {}))
+    for pname, (local, fb, ex) in planners.items():
+        extra = EXTRA if ex else []
+        names, cdev, rdev = strategy_table(dev, EFS, fb, extra)
         pl = KNNPlanner().fit(features(dev, local), cdev, rdev)
         out[pname] = {"k": pl.k}
         for tname, rows in tests.items():
-            _, ct, rt = strategy_table(rows, EFS, fb)
+            _, ct, rt = strategy_table(rows, EFS, fb, extra)
             pick = pl.predict(features(rows, local))
             res = evaluate(pick, ct, rt, overhead if local else 0.0)
             res["strategy_use"] = {names[i]: int(c) for i, c in enumerate(np.bincount(pick, minlength=len(names))) if c}
             out[pname][tname] = res
     for tname, rows in tests.items():
-        names, ct, rt = strategy_table(rows, EFS, True)
+        names, ct, rt = strategy_table(rows, EFS, True, EXTRA)
         out.setdefault("oracle", {})[tname] = evaluate(oracle_pick(ct, rt), ct, rt)
         out.setdefault("always_BF", {})[tname] = evaluate(np.zeros(len(rows), int), ct, rt)
         out[f"gain_B_over_D_{tname}"] = out["B_s_fallback"][tname]["total_cost"] / out["D_local_fallback"][tname]["total_cost"]
         out[f"gain_A_over_C_{tname}"] = out["A_s_only"][tname]["total_cost"] / out["C_local"][tname]["total_cost"]
+        if EXTRA:
+            out[f"gain_B0_over_D_{tname}"] = (out["B0_s_fallback_no_new"][tname]["total_cost"]
+                                              / out["D_local_fallback"][tname]["total_cost"])
     return out
 
 
@@ -118,14 +141,23 @@ def main():
     ap.add_argument("--centroids", type=int, default=64)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--tag", default="")
+    ap.add_argument("--new-strategies", action="store_true",
+                    help="also run IVFX (exact pruned) and S2H (seeded 2-hop graph search)")
     a = ap.parse_args()
+    if a.new_strategies:
+        EXTRA.extend(["IVFX"] + [f"S2H{ef}" for ef in S2H_EFS])
     summary = {}
     for name in a.datasets.split(","):
         t0 = time.time()
         X, labels, n_labels, dev_tasks, test_tasks = queries_for(name, a.seed)
         idx, g, Xint = build(X, os.path.join("results", "cache", f"exp2_{name}_{a.seed}.bin"))
         est = LocalSelectivity(X, labels, n_labels, n_centroids=a.centroids, seed=a.seed)
-        G.update(X=X, li=LabelIndex(labels, n_labels), g=g, Xint=Xint, est=est)
+        G.update(X=X, li=LabelIndex(labels, n_labels), g=g, Xint=Xint, est=est, new=a.new_strategies)
+        if a.new_strategies:
+            ivf = IVFExact(X, labels, n_labels, est.C, est._assign(X, est.C))
+            e2i = np.empty(len(X), np.int64)
+            e2i[g.ext_label] = np.arange(len(X))
+            G.update(ivf=ivf, sp=SeedPicker(ivf, e2i))
         print(f"[{name}] n={len(X)} d={X.shape[1]} index+estimator {time.time() - t0:.0f}s", flush=True)
         with mp.get_context("fork").Pool(a.workers) as pool:
             dev = pool.map(run_query, dev_tasks, chunksize=8)
@@ -138,7 +170,7 @@ def main():
                 w.writeheader()
                 w.writerows(rows)
         res = analyze(dev, tests, est.cost)
-        res["config"] = dict(dataset=name, n=len(X), d=X.shape[1], seed=a.seed, centroids=a.centroids,
+        res["config"] = dict(dataset=name, extra_strategies=EXTRA, n=len(X), d=X.shape[1], seed=a.seed, centroids=a.centroids,
                              efs=EFS, k=K, n_dev=len(dev), n_test={k: len(v) for k, v in tests.items()},
                              python=platform.python_version(), numpy=np.__version__,
                              runtime_s=round(time.time() - t0, 1))
@@ -147,7 +179,7 @@ def main():
         summary[name] = res
         for tname in tests:
             line = " | ".join(f"{p}: {res[p][tname]['mean_cost']:.0f} r{res[p][tname]['mean_recall']:.3f}"
-                              for p in list(PLANNERS) + ["oracle", "always_BF"])
+                              for p in list(PLANNERS) + (list(REF_PLANNERS) if EXTRA else []) + ["oracle", "always_BF"])
             print(f"[{name}/{tname}] {line} | B/D={res[f'gain_B_over_D_{tname}']:.2f}", flush=True)
         print(f"[{name}] done in {time.time() - t0:.0f}s", flush=True)
 
