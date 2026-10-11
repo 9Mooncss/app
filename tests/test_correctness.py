@@ -137,3 +137,61 @@ def test_ivf_exact_matches_bruteforce(small):
                 ref, rd2, nbf = bruteforce_knn(ds.X, q, li.ids(P), 10)
                 np.testing.assert_allclose(np.sort(d2), np.sort(rd2), rtol=1e-4)
                 assert nd <= nbf + 16
+
+
+@pytest.mark.parametrize("residual", [False, True])
+def test_pca_bound_is_exact_and_lower_bound(small, residual):
+    from fknn.exact_lb import PCABound
+    ds, li = small
+    pb = PCABound(ds.X, m=4, residual_term=residual)
+    for mode in MODES:
+        for s in (0.01, 0.1, 0.5):
+            for q, P in make_queries(ds, 10, mode, s, seed=12):
+                ids = li.ids(P)
+                got, gd, st = pb.search(q, ids, 10)
+                ref, rd, _ = bruteforce_knn(ds.X, q, ids, 10)
+                np.testing.assert_allclose(np.sort(gd), np.sort(rd), rtol=1e-4)
+                assert st["refined"] <= len(ids)
+    # the bound itself never exceeds the true distance
+    q, P = make_queries(ds, 1, "neutral", 0.5, seed=1)[0]
+    qc = q - pb.mu
+    pq = qc @ pb.V
+    rq = np.sqrt(max(qc @ qc - pq @ pq, 0))
+    lb = ((pb.Y - pq) ** 2).sum(1) + ((pb.r - rq) ** 2 if residual else 0)
+    true = ((ds.X - q) ** 2).sum(1)
+    assert np.all(lb <= true * (1 + 1e-4) + 1e-4)
+
+
+@pytest.mark.parametrize("rotate,int8", [(False, False), (True, False), (True, True)])
+def test_va_bound_exact(small, rotate, int8):
+    from fknn.exact_va import VABound
+    ds, li = small
+    va = VABound(ds.X, bits=3, rotate=rotate)
+    for mode in MODES:
+        for s in (0.01, 0.2):
+            for q, P in make_queries(ds, 8, mode, s, seed=13):
+                ids = li.ids(P)
+                _, gd, _ = va.search(q, ids, 10, int8_table=int8)
+                _, rd, _ = bruteforce_knn(ds.X, q, ids, 10)
+                np.testing.assert_allclose(np.sort(gd), np.sort(rd), rtol=1e-4)
+    q = make_queries(ds, 1, "neutral", 0.5, seed=1)[0][0]
+    T = va.table(q)
+    lb = T[np.arange(va.d)[None, :], va.codes].sum(1)
+    assert np.all(lb <= ((ds.X - q) ** 2).sum(1) * (1 + 1e-4) + 1e-4)
+
+
+def test_fastscan_c_exact(small):
+    from fknn.fastscan import FastScanIndex
+    ds, li = small
+    fs = FastScanIndex(ds.X, ds.labels, ds.n_labels)
+    for mode in MODES:
+        for s in (0.01, 0.1, 0.5):
+            qs = make_queries(ds, 10, mode, s, seed=17)
+            Q = np.stack([q for q, _ in qs]); Ps = [P for _, P in qs]
+            _, bd, _, bn = fs.bf(Q, Ps)
+            _, vd, _, nr, ns = fs.va(Q, Ps)
+            for i, (q, P) in enumerate(qs):
+                _, rd, nbf = bruteforce_knn(ds.X, q, li.ids(P), 10)
+                np.testing.assert_allclose(bd[i], np.sort(rd), rtol=1e-4)
+                np.testing.assert_allclose(vd[i], np.sort(rd), rtol=1e-4)
+                assert bn[i] == nbf and ns[i] == nbf and nr[i] <= nbf
