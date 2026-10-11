@@ -1,0 +1,102 @@
+{
+  "A_s_only": {
+    "k": 150,
+    "natural": {
+      "total_cost": 634714.0,
+      "mean_cost": 2115.713333333333,
+      "mean_recall": 0.9970000000000001,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 229,
+        "HNSW16": 71
+      }
+    }
+  },
+  "B_s_fallback": {
+    "k": 15,
+    "natural": {
+      "total_cost": 669766.5,
+      "mean_cost": 2232.555,
+      "mean_recall": 0.9966666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 211,
+        "HNSW16": 48,
+        "HNSW16fb0.25": 17,
+        "HNSW16fb0.5": 10,
+        "HNSW16fb1": 11,
+        "HNSW16fb2": 3
+      }
+    }
+  },
+  "C_local": {
+    "k": 5,
+    "natural": {
+      "total_cost": 539649.0,
+      "mean_cost": 1798.83,
+      "mean_recall": 0.9976666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 205,
+        "HNSW16": 95
+      }
+    }
+  },
+  "D_local_fallback": {
+    "k": 5,
+    "natural": {
+      "total_cost": 539649.0,
+      "mean_cost": 1798.83,
+      "mean_recall": 0.9976666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 205,
+        "HNSW16": 95
+      }
+    }
+  },
+  "oracle": {
+    "natural": {
+      "total_cost": 490180.0,
+      "mean_cost": 1633.9333333333334,
+      "mean_recall": 0.9986666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "always_BF": {
+    "natural": {
+      "total_cost": 1112589.0,
+      "mean_cost": 3708.63,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "gain_B_over_D_natural": 1.2411150581211121,
+  "gain_A_over_C_natural": 1.1761608008168272,
+  "config": {
+    "dataset": "fashion",
+    "n": 60000,
+    "d": 784,
+    "seed": 0,
+    "centroids": 64,
+    "efs": [
+      16,
+      64,
+      256
+    ],
+    "k": 10,
+    "n_dev": 700,
+    "n_test": {
+      "natural": 300
+    },
+    "python": "3.13.16",
+    "numpy": "2.5.3",
+    "runtime_s": 106.6
+  }
+}
