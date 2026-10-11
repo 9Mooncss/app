@@ -24,7 +24,7 @@ def _p(a):
 
 
 class FastScanIndex:
-    def __init__(self, X, labels, n_labels, bits=4, seed=0):
+    def __init__(self, X, labels, n_labels, bits=4, seed=0, bits3=6):
         assert bits == 4
         order = np.argsort(labels, kind="stable")
         self.row_to_id = order.astype(np.int64)
@@ -54,6 +54,35 @@ class FastScanIndex:
             flat[s0:s0 + (b - a)] = codes_sorted[a:b]
         self.codes = np.ascontiguousarray(codes.transpose(0, 2, 1))   # (nb, d, 32)
         self.d, self.nslots = d, nb * 32
+        # v2 layout: blocks of 64 slots, dims padded to a multiple of 4
+        nblk2 = (counts + 63) // 64
+        self.lblock2 = np.concatenate([[0], np.cumsum(nblk2)]).astype(np.int64)
+        nb2 = int(self.lblock2[-1])
+        self.d4 = (d + 3) // 4 * 4
+        self.slot_row2 = np.full(nb2 * 64, -1, dtype=np.int64)
+        codes2 = np.zeros((nb2 * 64, self.d4), dtype=np.uint8)
+        for l in range(n_labels):
+            a, b = self.lstart[l], self.lstart[l + 1]
+            if b == a:
+                continue
+            s0 = self.lblock2[l] * 64
+            self.slot_row2[s0:s0 + (b - a)] = np.arange(a, b)
+            codes2[s0:s0 + (b - a), :d] = codes_sorted[a:b]
+        self.codes2 = np.ascontiguousarray(codes2.reshape(nb2, 64, self.d4).transpose(0, 2, 1))
+        # v3 layout: same 64-slot blocks, codes with bits3 bits (5..7), d not padded
+        va3 = VABound(X, bits=bits3, rotate=False, seed=seed)
+        self.bits3 = bits3
+        self.edges3_lo = np.ascontiguousarray(va3.lo + va3.mu[:, None], dtype=np.float32)
+        self.edges3_hi = np.ascontiguousarray(va3.hi + va3.mu[:, None], dtype=np.float32)
+        c3 = va3.codes[order]
+        codes3 = np.zeros((nb2 * 64, d), dtype=np.uint8)
+        for l in range(n_labels):
+            a, b = self.lstart[l], self.lstart[l + 1]
+            if b > a:
+                s0 = self.lblock2[l] * 64
+                codes3[s0:s0 + (b - a)] = c3[a:b]
+        self.codes3 = np.ascontiguousarray(codes3.reshape(nb2, 64, d).transpose(0, 2, 1))
+        self.nslots = max(self.nslots, nb2 * 64)
         self.lb_buf = np.empty(self.nslots, dtype=np.uint16)
         self.slot_buf = np.empty(self.nslots, dtype=np.int64)
 
@@ -81,4 +110,26 @@ class FastScanIndex:
         _lib.va_batch(_p(self.Xs), ctypes.c_int(self.d), _p(self.codes), _p(self.slot_row), _p(self.lblock),
                       _p(self.edges_lo), _p(self.edges_hi), _p(Q), ctypes.c_int(nq), _p(qlab), _p(qoff),
                       ctypes.c_int(k), _p(oid), _p(od), _p(t), _p(nr), _p(ns), _p(self.lb_buf), _p(self.slot_buf))
+        return self.row_to_id[np.maximum(oid, 0)], od, t, nr, ns
+
+    def va3(self, Q, label_sets, k=10):
+        """AVX-512 VBMI kernel: bits3-bit codes (vpermb / vpermi2b), 64-slot blocks."""
+        Q, qlab, qoff = self._qarrays(Q, label_sets)
+        nq = len(Q)
+        oid = np.empty((nq, k), np.int64); od = np.empty((nq, k), np.float32)
+        t = np.empty(nq); nr = np.empty(nq, np.int64); ns = np.empty(nq, np.int64)
+        _lib.va3_batch(_p(self.Xs), ctypes.c_int(self.d), ctypes.c_int(self.bits3), _p(self.codes3), _p(self.slot_row2),
+                       _p(self.lblock2), _p(self.edges3_lo), _p(self.edges3_hi), _p(Q), ctypes.c_int(nq), _p(qlab),
+                       _p(qoff), ctypes.c_int(k), _p(oid), _p(od), _p(t), _p(nr), _p(ns), _p(self.lb_buf), _p(self.slot_buf))
+        return self.row_to_id[np.maximum(oid, 0)], od, t, nr, ns
+
+    def va2(self, Q, label_sets, k=10):
+        """AVX-512 kernel, 64-slot blocks, 6-bit table with 4-dim uint8 pre-accumulation."""
+        Q, qlab, qoff = self._qarrays(Q, label_sets)
+        nq = len(Q)
+        oid = np.empty((nq, k), np.int64); od = np.empty((nq, k), np.float32)
+        t = np.empty(nq); nr = np.empty(nq, np.int64); ns = np.empty(nq, np.int64)
+        _lib.va2_batch(_p(self.Xs), ctypes.c_int(self.d), ctypes.c_int(self.d4), _p(self.codes2), _p(self.slot_row2),
+                       _p(self.lblock2), _p(self.edges_lo), _p(self.edges_hi), _p(Q), ctypes.c_int(nq), _p(qlab),
+                       _p(qoff), ctypes.c_int(k), _p(oid), _p(od), _p(t), _p(nr), _p(ns), _p(self.lb_buf), _p(self.slot_buf))
         return self.row_to_id[np.maximum(oid, 0)], od, t, nr, ns

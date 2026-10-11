@@ -51,16 +51,19 @@ def main():
     for name in names:
         t0 = time.time()
         X, labels, L, qs = workload(name)
-        fs = FastScanIndex(X, labels, L)
+        fs = FastScanIndex(X, labels, L, bits3=int(os.environ.get("BITS3", "6")))
         build_s = time.time() - t0
         Q = np.stack([q for q, _, _ in qs]); Ps = [P for _, P, _ in qs]
-        tb = np.full(len(qs), np.inf); tv = np.full(len(qs), np.inf)
+        tb = np.full(len(qs), np.inf); tv = np.full(len(qs), np.inf); t2 = np.full(len(qs), np.inf)
         for _ in range(REPS):
             _, bd, t, nb = fs.bf(Q, Ps)
             tb = np.minimum(tb, t)
             _, vd, t, nr, ns = fs.va(Q, Ps)
             tv = np.minimum(tv, t)
+            _, vd2, t, nr2, _ = getattr(fs, os.environ.get("ALT", "va2"))(Q, Ps)
+            t2 = np.minimum(t2, t)
         assert np.allclose(bd, vd, rtol=1e-4, atol=1e-5), "VA result differs from brute force"
+        assert np.allclose(bd, vd2, rtol=1e-4, atol=1e-5), "alternative kernel result differs from brute force"
         s = nb / len(X)
         groups = {"all": np.ones(len(qs), bool)}
         for b in ("s<1%", "1%<=s<10%", "s>=10%"):
@@ -79,11 +82,15 @@ def main():
                      speedup_total=float(tb[mask].sum() / tv[mask].sum()),
                      speedup_median_query=float(np.median(tb[mask] / tv[mask])),
                      frac_queries_va_slower=float((tv[mask] > tb[mask]).mean()),
-                     refined_frac=float(nr[mask].sum() / nb[mask].sum()))
+                     refined_frac=float(nr[mask].sum() / nb[mask].sum()),
+                     va2_mean_us=float(t2[mask].mean() / 1e3),
+                     va2_speedup_total=float(tb[mask].sum() / t2[mask].sum()),
+                     va2_refined_frac=float(nr2[mask].sum() / nb[mask].sum()))
             res["groups"][g] = r
             print(f"[{name}/{g}] n={r['n']} BF {r['bf_mean_us']:.0f}us  VA {r['va_mean_us']:.0f}us  "
                   f"speedup(total) {r['speedup_total']:.2f}x  median-query {r['speedup_median_query']:.2f}x  "
-                  f"VA slower on {100 * r['frac_queries_va_slower']:.0f}%  refined {r['refined_frac']:.3f}", flush=True)
+                  f"VA slower on {100 * r['frac_queries_va_slower']:.0f}%  refined {r['refined_frac']:.3f} | "
+                  f"VA2 {r['va2_mean_us']:.0f}us {r['va2_speedup_total']:.2f}x refined {r['va2_refined_frac']:.3f}", flush=True)
         out_all[name] = res
     out_all["config"] = dict(reps=REPS, k=10, bits=4, python=platform.python_version(), numpy=np.__version__,
                              cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].strip(": "),

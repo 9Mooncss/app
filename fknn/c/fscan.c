@@ -87,18 +87,23 @@ void va_batch(const float *Xs, int d, const uint8_t *codes, const int64_t *slot_
     for (int qi = 0; qi < nq; qi++) {
         const float *q = Q + (int64_t)qi * d;
         double t0 = now_ns();
-        /* 1) table of squared gaps, quantized down to uint8 */
-        float tmax = 0.f;
-        for (int i = 0; i < d; i++) for (int c = 0; c < 16; c++) {
-            float lo = edges_lo[i * 16 + c], hi = edges_hi[i * 16 + c], g = 0.f;
-            if (q[i] < lo) g = lo - q[i]; else if (q[i] > hi) g = q[i] - hi;
-            T[i * 16 + c] = g * g; if (g * g > tmax) tmax = g * g;
-        }
-        float scale = tmax > 0 ? tmax / 255.f : 1.f, inv = 1.f / scale;
+        /* 1) table of squared gaps (AVX-512), quantized down to uint8 */
+        __m512 vmax = _mm512_setzero_ps();
+        const __m512 zero = _mm512_setzero_ps();
         for (int i = 0; i < d; i++) {
-            uint8_t row[16];
-            for (int c = 0; c < 16; c++) { float v = floorf(T[i * 16 + c] * inv); row[c] = v > 255.f ? 255 : (uint8_t)v; }
-            tbl[i] = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)row));
+            const __m512 vq = _mm512_set1_ps(q[i]);
+            __m512 g = _mm512_max_ps(_mm512_max_ps(_mm512_sub_ps(_mm512_loadu_ps(edges_lo + i * 16), vq),
+                                                   _mm512_sub_ps(vq, _mm512_loadu_ps(edges_hi + i * 16))), zero);
+            g = _mm512_mul_ps(g, g);
+            _mm512_storeu_ps(T + i * 16, g);
+            vmax = _mm512_max_ps(vmax, g);
+        }
+        float tmax = _mm512_reduce_max_ps(vmax);
+        float scale = tmax > 0 ? tmax / 255.f : 1.f, inv = 1.f / scale;
+        const __m512 vinv = _mm512_set1_ps(inv), v255 = _mm512_set1_ps(255.f);
+        for (int i = 0; i < d; i++) {
+            __m512 v = _mm512_min_ps(_mm512_roundscale_ps(_mm512_mul_ps(_mm512_loadu_ps(T + i * 16), vinv), _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC), v255);
+            tbl[i] = _mm256_broadcastsi128_si256(_mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
         }
         /* 2) SIMD bound scan over the allowed labels' blocks */
         int64_t ns = 0;
@@ -137,4 +142,184 @@ void va_batch(const float *Xs, int d, const uint8_t *codes, const int64_t *slot_
         for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
     }
     free(tbl); free(T);
+}
+
+/* ---------------------------------------------------------------------------------
+ * v2 kernel (AVX-512BW): blocks of 64 slots, table quantized DOWN to 6 bits (0..63)
+ * so that 4 dimensions can be summed in uint8 without overflow (4*63 = 252) before
+ * widening to uint16. Layout: codes2 [nb][d4][64] with d4 = d rounded up to a
+ * multiple of 4 (padding dims have code 0 and an all-zero table row).
+ * Bounds stay valid lower bounds (floor quantization, no saturation for d4*63 < 65536).
+ * ------------------------------------------------------------------------------- */
+static inline void scan_block64(const uint8_t *blk, const __m512i *tbl, int d4, uint16_t *lb64) {
+    __m512i acc_lo = _mm512_setzero_si512(), acc_hi = _mm512_setzero_si512(), z = _mm512_setzero_si512();
+    for (int i = 0; i < d4; i += 4) {
+        __m512i s = _mm512_shuffle_epi8(tbl[i], _mm512_loadu_si512(blk + (int64_t)i * 64));
+        s = _mm512_add_epi8(s, _mm512_shuffle_epi8(tbl[i + 1], _mm512_loadu_si512(blk + (int64_t)(i + 1) * 64)));
+        s = _mm512_add_epi8(s, _mm512_shuffle_epi8(tbl[i + 2], _mm512_loadu_si512(blk + (int64_t)(i + 2) * 64)));
+        s = _mm512_add_epi8(s, _mm512_shuffle_epi8(tbl[i + 3], _mm512_loadu_si512(blk + (int64_t)(i + 3) * 64)));
+        acc_lo = _mm512_add_epi16(acc_lo, _mm512_unpacklo_epi8(s, z));
+        acc_hi = _mm512_add_epi16(acc_hi, _mm512_unpackhi_epi8(s, z));
+    }
+    uint16_t lo[32], hi[32];
+    _mm512_storeu_si512(lo, acc_lo);
+    _mm512_storeu_si512(hi, acc_hi);
+    /* per 128-bit lane L (0..3): unpacklo gives bytes 16L..16L+7, unpackhi bytes 16L+8..16L+15 */
+    for (int L = 0; L < 4; L++)
+        for (int j = 0; j < 8; j++) { lb64[16 * L + j] = lo[8 * L + j]; lb64[16 * L + 8 + j] = hi[8 * L + j]; }
+}
+
+void va2_batch(const float *Xs, int d, int d4, const uint8_t *codes, const int64_t *slot_row, const int64_t *lblock,
+               const float *edges_lo, const float *edges_hi,
+               const float *Q, int nq, const int64_t *qlab, const int64_t *qoff, int k,
+               int64_t *out_id, float *out_d, double *t_ns, int64_t *n_refined, int64_t *n_slots,
+               uint16_t *lb_buf, int64_t *slot_buf) {
+    __m512i *tbl = aligned_alloc(64, sizeof(__m512i) * d4);
+    float *T = malloc(sizeof(float) * d * 16);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        float tmax = 0.f;
+        for (int i = 0; i < d; i++) for (int c = 0; c < 16; c++) {
+            float lo = edges_lo[i * 16 + c], hi = edges_hi[i * 16 + c], g = 0.f;
+            if (q[i] < lo) g = lo - q[i]; else if (q[i] > hi) g = q[i] - hi;
+            T[i * 16 + c] = g * g; if (g * g > tmax) tmax = g * g;
+        }
+        float scale = tmax > 0 ? tmax / 63.f : 1.f, inv = 1.f / scale;
+        for (int i = 0; i < d4; i++) {
+            uint8_t row[16] = {0};
+            if (i < d) for (int c = 0; c < 16; c++) { float v = floorf(T[i * 16 + c] * inv); row[c] = v > 63.f ? 63 : (uint8_t)v; }
+            tbl[i] = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)row));
+        }
+        int64_t ns = 0;
+        for (int64_t a = qoff[qi]; a < qoff[qi + 1]; a++) {
+            int64_t l = qlab[a];
+            for (int64_t b = lblock[l]; b < lblock[l + 1]; b++) {
+                uint16_t lb64[64];
+                scan_block64(codes + b * (int64_t)d4 * 64, tbl, d4, lb64);
+                for (int j = 0; j < 64; j++) {
+                    int64_t s = b * 64 + j;
+                    if (slot_row[s] < 0) continue;
+                    lb_buf[ns] = lb64[j]; slot_buf[ns] = slot_row[s]; ns++;
+                }
+            }
+        }
+        topk_t tk; tk_init(&tk, k);
+        int64_t refined = 0;
+        if (ns > 0) {
+            static int64_t hist[65536 >> 4];
+            memset(hist, 0, sizeof(hist));
+            for (int64_t s = 0; s < ns; s++) hist[lb_buf[s] >> 4]++;
+            int64_t acc = 0; int cut = 0;
+            for (; cut < (65536 >> 4); cut++) { acc += hist[cut]; if (acc >= k) break; }
+            uint32_t lim = ((uint32_t)cut + 1) << 4;
+            for (int64_t s = 0; s < ns; s++) if (lb_buf[s] < lim) { tk_push(&tk, l2(Xs + slot_buf[s] * d, q, d), slot_buf[s]); refined++; slot_buf[s] = -1; }
+            for (int64_t s = 0; s < ns; s++) {
+                if (slot_buf[s] < 0) continue;
+                if ((float)lb_buf[s] * scale >= tk_worst(&tk)) continue;
+                tk_push(&tk, l2(Xs + slot_buf[s] * d, q, d), slot_buf[s]); refined++;
+            }
+        }
+        t_ns[qi] = now_ns() - t0;
+        n_refined[qi] = refined; n_slots[qi] = ns;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+    free(tbl); free(T);
+}
+
+/* ---------------------------------------------------------------------------------
+ * v3 kernel (AVX-512 VBMI): b-bit codes (b = 5..7), 64-slot blocks, one-byte codes.
+ * b <= 6: vpermb  (_mm512_permutexvar_epi8)  = 64 lookups into a 64-entry table;
+ * b == 7: vpermi2b (_mm512_permutex2var_epi8) = 64 lookups into a 128-entry table.
+ * Table rounded DOWN to uint8 (255 levels), saturating uint16 accumulation:
+ * both only lower the bound -> exactness is kept.
+ * edges_lo/hi: [d][2^b] cell intervals.  codes3: [nb][d][64].
+ * ------------------------------------------------------------------------------- */
+static inline void scan_block64_v3(const uint8_t *blk, const __m512i *tA, const __m512i *tB, int d, int b7, uint16_t *lb64) {
+    __m512i acc_lo = _mm512_setzero_si512(), acc_hi = _mm512_setzero_si512(), z = _mm512_setzero_si512();
+    for (int i = 0; i < d; i++) {
+        __m512i c = _mm512_loadu_si512(blk + (int64_t)i * 64);
+        __m512i v = b7 ? _mm512_permutex2var_epi8(tA[i], c, tB[i]) : _mm512_permutexvar_epi8(c, tA[i]);
+        acc_lo = _mm512_adds_epu16(acc_lo, _mm512_unpacklo_epi8(v, z));
+        acc_hi = _mm512_adds_epu16(acc_hi, _mm512_unpackhi_epi8(v, z));
+    }
+    uint16_t lo[32], hi[32];
+    _mm512_storeu_si512(lo, acc_lo);
+    _mm512_storeu_si512(hi, acc_hi);
+    for (int L = 0; L < 4; L++)
+        for (int j = 0; j < 8; j++) { lb64[16 * L + j] = lo[8 * L + j]; lb64[16 * L + 8 + j] = hi[8 * L + j]; }
+}
+
+void va3_batch(const float *Xs, int d, int bits, const uint8_t *codes, const int64_t *slot_row, const int64_t *lblock,
+               const float *edges_lo, const float *edges_hi,
+               const float *Q, int nq, const int64_t *qlab, const int64_t *qoff, int k,
+               int64_t *out_id, float *out_d, double *t_ns, int64_t *n_refined, int64_t *n_slots,
+               uint16_t *lb_buf, int64_t *slot_buf) {
+    const int C = 1 << bits, b7 = bits == 7;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *T = malloc(sizeof(float) * d * C);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        /* table build fully in AVX-512 (scalar fmaxf/floorf cost ~2-10 ns per entry) */
+        __m512 vmax = _mm512_setzero_ps();
+        const __m512 zero = _mm512_setzero_ps();
+        for (int i = 0; i < d; i++) {
+            const __m512 vq = _mm512_set1_ps(q[i]);
+            for (int c = 0; c < C; c += 16) {   /* C = 2^bits, a multiple of 16 */
+                __m512 g = _mm512_max_ps(_mm512_max_ps(_mm512_sub_ps(_mm512_loadu_ps(edges_lo + (int64_t)i * C + c), vq),
+                                                       _mm512_sub_ps(vq, _mm512_loadu_ps(edges_hi + (int64_t)i * C + c))), zero);
+                g = _mm512_mul_ps(g, g);
+                _mm512_storeu_ps(T + (int64_t)i * C + c, g);
+                vmax = _mm512_max_ps(vmax, g);
+            }
+        }
+        float tmax = _mm512_reduce_max_ps(vmax);
+        float scale = tmax > 0 ? tmax / 255.f : 1.f, inv = 1.f / scale;
+        const __m512 vinv = _mm512_set1_ps(inv), v255 = _mm512_set1_ps(255.f);
+        for (int i = 0; i < d; i++) {
+            uint8_t row[128] __attribute__((aligned(64))) = {0};
+            const float *Ti = T + (int64_t)i * C;
+            for (int c = 0; c < C; c += 16) {
+                __m512 v = _mm512_min_ps(_mm512_roundscale_ps(_mm512_mul_ps(_mm512_loadu_ps(Ti + c), vinv), _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC), v255);
+                _mm_storeu_si128((__m128i *)(row + c), _mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
+            }
+            if (C < 64) for (int c = C; c < 64; c++) row[c] = row[c % C];
+            tA[i] = _mm512_load_si512(row);
+            tB[i] = _mm512_load_si512(row + 64);
+        }
+        int64_t ns = 0;
+        for (int64_t a = qoff[qi]; a < qoff[qi + 1]; a++) {
+            int64_t l = qlab[a];
+            for (int64_t b = lblock[l]; b < lblock[l + 1]; b++) {
+                uint16_t lb64[64];
+                scan_block64_v3(codes + b * (int64_t)d * 64, tA, tB, d, b7, lb64);
+                for (int j = 0; j < 64; j++) {
+                    int64_t s = b * 64 + j;
+                    if (slot_row[s] < 0) continue;
+                    lb_buf[ns] = lb64[j]; slot_buf[ns] = slot_row[s]; ns++;
+                }
+            }
+        }
+        topk_t tk; tk_init(&tk, k);
+        int64_t refined = 0;
+        if (ns > 0) {
+            static int64_t hist[65536 >> 4];
+            memset(hist, 0, sizeof(hist));
+            for (int64_t s = 0; s < ns; s++) hist[lb_buf[s] >> 4]++;
+            int64_t acc = 0; int cut = 0;
+            for (; cut < (65536 >> 4); cut++) { acc += hist[cut]; if (acc >= k) break; }
+            uint32_t lim = ((uint32_t)cut + 1) << 4;
+            for (int64_t s = 0; s < ns; s++) if (lb_buf[s] < lim) { tk_push(&tk, l2(Xs + slot_buf[s] * d, q, d), slot_buf[s]); refined++; slot_buf[s] = -1; }
+            for (int64_t s = 0; s < ns; s++) {
+                if (slot_buf[s] < 0) continue;
+                if ((float)lb_buf[s] * scale >= tk_worst(&tk)) continue;
+                tk_push(&tk, l2(Xs + slot_buf[s] * d, q, d), slot_buf[s]); refined++;
+            }
+        }
+        t_ns[qi] = now_ns() - t0;
+        n_refined[qi] = refined; n_slots[qi] = ns;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+    free(tA); free(tB); free(T);
 }
