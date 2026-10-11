@@ -119,3 +119,89 @@ Mean distance computations per query on TEST (mean recall@10 in all cells ≥ 0.
   negative correlation (0.2–0.65). This is a known weakness of graph search for
   out-of-distribution queries (flat distance landscape), so S2H needs a planner
   to keep it away from those queries → Experiment 3.
+
+## Cycle 3 — Experiment 3: planners with a richer strategy set
+
+Same protocol as Experiment 2, but planners may also choose
+IVFX (exact cluster pruning) and S2H (allowed-only 2-hop graph traversal from
+cluster × label seeds, ef ∈ {16, 64}). S2H is charged for adjacency scans:
+cost = distances + w·edges, with w = time(edge scan)/time(distance) measured in C
+(`bench/edge_vs_dist.c`): 0.035–0.067 at d=64, 0.016–0.021 at d=100,
+0.002–0.003 at d=784. We use the worst (largest) value. Files: `results/exp3/`.
+
+Mean cost per query on TEST (w ×1; recall@10 in brackets):
+
+| dataset | best planner, old strategies (Exp 2) | best planner, + new strategies | gain | same with w ×3 |
+|---|---|---|---|---|
+| synth separated / grid | 5 025 (0.992) | 4 948 (0.988) | 1.02× | 1.01× |
+| synth separated / mixed | 11 903 (0.996) | 11 828 (0.994) | 1.01× | 1.01× |
+| synth overlap / grid | 4 485 (0.986) | 4 353 (0.985) | 1.03× | 1.01× |
+| synth overlap / mixed | 8 388 (0.984) | 8 288 (0.988) | 1.01× | 1.01× |
+| **Fashion-MNIST** | 1 799 (0.998) | **446 (0.978)** | **4.0×** | 3.6× |
+| **GloVe** | 6 040 (0.991) | **3 456 (0.986)** | **1.75×** | 1.56× |
+
+* On real data the new strategy set changes the picture; on synthetic data it
+  does not (cluster structure there is too clean for graph traversal across clusters).
+* With the new strategies the **local-selectivity features no longer help** on
+  real data (C/D are worse than A/B: 847 vs 446 on Fashion, 4 010 vs 3 456 on
+  GloVe). Extra noisy features hurt the k-NN learner, and the 64-distance
+  overhead matters when queries cost a few hundred. H2 is now clearly rejected.
+* Recall is slightly lower (0.978 vs 0.998 on Fashion) — hence Experiment 4.
+
+## Cycle 4 — Experiment 4: recall-matched curves and the seed ablation
+
+Each strategy swept over ef, no planner. 240 queries per dataset, broken down by
+selectivity band. A2H = the same 2-hop traversal started from the usual hnswlib
+entry point (ACORN-like ablation, NOT real ACORN: ACORN also builds a denser graph,
+which would help it). Figure: `results/exp4/curves_real.png`.
+Cheapest mean cost reaching mean recall@10 ≥ 0.95 ("–" = never reaches it):
+
+| dataset / band | BF | HNSW (hnswlib) | A2H (ACORN-like) | S2H (seeded) |
+|---|---|---|---|---|
+| Fashion s<1% | **314** | 11 874 | – (max 0.62) | – (max 0.84) |
+| Fashion 1–10% | 2 505 | 7 622 | 691 | **457** |
+| Fashion ≥10% | 12 075 | 2 362 | **578** | 586 |
+| GloVe s<1% | **742** | 46 287 | – (max 0.69) | – (max 0.80) |
+| GloVe 1–10% | 7 501 | 24 011 | 3 860 | **3 784** |
+| GloVe ≥10% | 52 557 | 4 914 | 3 932 | **3 849** |
+| synth separated, neutral | 12 774 | 17 420 | – | **2 380** |
+| synth overlap, s<1% | **433** | 45 468 | 3 567 | 1 510 |
+| synth overlap, neutral | 12 774 | 21 507 | 3 525 | **3 048** |
+
+What this shows:
+1. **The big win is allowed-only 2-hop traversal itself** (the ACORN idea), even on
+   the unmodified hnswlib graph: 2–5.5× fewer operations than BF and 1.3–17× fewer
+   than hnswlib's filtered search at s ≥ 1%. This is *known* and is what modern
+   vector databases already ship (ACORN in Weaviate and Qdrant).
+2. **Our addition (cluster × label seeds) helps only where the allowed subgraph is
+   fragmented**: separated clusters (A2H never reaches 0.95, S2H does at 2 380),
+   Fashion 1–10% (1.5×), and recall at s<1% (+0.1–0.2). On GloVe it is ≈ 1.0–1.02×.
+3. **Below 1% selectivity nothing graph-based beats brute force** on these sizes.
+4. **Negative correlation stays unsolved by graphs**: every graph method fails to
+   reach recall 0.95; only BF does.
+
+## Overall verdict after 4 cycles (honest)
+
+* **Confirmed, but not new:** (a) global selectivity alone mispredicts cost (H1);
+  (b) a per-query choice between brute force and 2-hop filtered graph search beats
+  hnswlib's filtered search by large factors on real data. Both are consistent with
+  the published literature (ACORN, RACORN-1, PostgreSQL study 2603.23710).
+* **Our own ideas, measured:**
+  - Local-selectivity planner (H2): +7–23% with old strategies, **0% or negative**
+    with modern strategies → rejected.
+  - Exact triangle-inequality cluster pruning: ≤ 36% on synthetic, ~0% on real →
+    rejected.
+  - Seeding plain hnswlib search: no effect → rejected.
+  - Cluster × label seeds for 2-hop traversal: real but **narrow** gain (fragmented
+    allowed subgraphs; 1.5× on Fashion 1–10%), close to existing ideas (filtered
+    entry points in Weaviate; cluster restarts in arXiv:2604.00102) → not a moat.
+* **No defensible algorithmic advantage over the state of the art has been shown.**
+  We also did not run real ACORN or RACORN-1, so even the narrow gain is not
+  established against them.
+
+### Where the remaining opportunity is (by the data)
+* The **s < 1% band**: graphs fail and brute force costs s·n, which grows linearly
+  with the database (at 1B vectors and s = 0.1%, 1M distances per query). This is
+  the regime targeted by Curator (arXiv:2601.01291) and RACORN-1 — active, crowded.
+* **Negative correlation** (out-of-distribution w.r.t. the allowed subset): all graph
+  methods fail. Exact or partition-based methods are the only reliable option today.
