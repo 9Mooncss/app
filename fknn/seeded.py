@@ -175,3 +175,47 @@ def seeded_2hop_search(g, Xint, q, k, ef, allowed_int, seeds):
     res = sorted((-nd, -ni) for nd, ni in top)[:k]
     ids = np.array([g.ext_label[i] for _, i in res], dtype=np.int64)
     return ids, np.array([d for d, _ in res], dtype=np.float32), ndist, nedges
+
+
+def acorn_like_search(g, Xint, q, k, ef, allowed_int):
+    """Ablation baseline for S2H: the same allowed-only 2-hop layer-0 traversal, but
+    started the ACORN/hnswlib way - from the greedy-descent entry point (unfiltered
+    upper layers) and its allowed 1-/2-hop neighbors - with NO cluster seeds.
+    (ACORN proper also filters the upper layers and builds a denser graph; this is a
+    simplified stand-in on the unmodified hnswlib graph.)
+    Returns (ids, dists, n_distance_computations, n_edges_scanned)."""
+    ndist = 0
+    cur = g.entry
+    v = Xint[cur] - q
+    curd = float(np.dot(v, v)); ndist += 1
+    for level in range(g.maxlevel, 0, -1):
+        changed = True
+        while changed:
+            changed = False
+            nb = g.upper[cur][level]
+            if len(nb) == 0:
+                continue
+            diff = Xint[nb] - q
+            ds = np.einsum("ij,ij->i", diff, diff); ndist += len(nb)
+            for c, d in zip(nb.tolist(), ds.tolist()):
+                if d < curd:
+                    curd, cur, changed = d, c, True
+    # starting set: entry if allowed, plus allowed nodes within 2 hops of it
+    n1 = g.level0[cur, :g.level0_count[cur]]
+    n2 = g.level0[n1].ravel()
+    near = np.concatenate([[cur], n1, n2[n2 >= 0]])
+    start = np.unique(near[allowed_int[near]])
+    nedges = len(n1) + len(n2)
+    if len(start) == 0:
+        # nothing allowed nearby: fall back to a BFS ring until something allowed is found
+        frontier, seen = n2[n2 >= 0], set(near.tolist())
+        while len(start) == 0 and len(frontier):
+            nxt = g.level0[np.unique(frontier)].ravel()
+            nxt = nxt[nxt >= 0]
+            nedges += len(nxt)
+            nxt = np.array([x for x in np.unique(nxt).tolist() if x not in seen], dtype=np.int64)
+            seen.update(nxt.tolist())
+            start = nxt[allowed_int[nxt]] if len(nxt) else start
+            frontier = nxt
+    ids, dists, nd, ne = seeded_2hop_search(g, Xint, q, k, ef, allowed_int, start)
+    return ids, dists, nd + ndist, ne + nedges

@@ -1,0 +1,146 @@
+{
+  "A_s_only": {
+    "k": 50,
+    "natural": {
+      "total_cost": 126599.0,
+      "mean_cost": 421.99666666666667,
+      "mean_recall": 0.9783333333333335,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05,
+      "strategy_use": {
+        "BF": 52,
+        "IVFX": 66,
+        "S2H16": 45,
+        "S2H64": 137
+      }
+    }
+  },
+  "B_s_fallback": {
+    "k": 50,
+    "natural": {
+      "total_cost": 126599.0,
+      "mean_cost": 421.99666666666667,
+      "mean_recall": 0.9783333333333335,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05,
+      "strategy_use": {
+        "BF": 52,
+        "IVFX": 66,
+        "S2H16": 45,
+        "S2H64": 137
+      }
+    }
+  },
+  "C_local": {
+    "k": 5,
+    "natural": {
+      "total_cost": 249086.0,
+      "mean_cost": 830.2866666666666,
+      "mean_recall": 0.9763333333333333,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05333333333333334,
+      "strategy_use": {
+        "BF": 38,
+        "HNSW16": 16,
+        "IVFX": 98,
+        "S2H16": 67,
+        "S2H64": 81
+      }
+    }
+  },
+  "D_local_fallback": {
+    "k": 5,
+    "natural": {
+      "total_cost": 249086.0,
+      "mean_cost": 830.2866666666666,
+      "mean_recall": 0.9763333333333333,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05333333333333334,
+      "strategy_use": {
+        "BF": 38,
+        "HNSW16": 16,
+        "IVFX": 98,
+        "S2H16": 67,
+        "S2H64": 81
+      }
+    }
+  },
+  "B0_s_fallback_no_new": {
+    "k": 15,
+    "natural": {
+      "total_cost": 669766.5,
+      "mean_cost": 2232.555,
+      "mean_recall": 0.9966666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 211,
+        "HNSW16": 48,
+        "HNSW16fb0.25": 17,
+        "HNSW16fb0.5": 10,
+        "HNSW16fb1": 11,
+        "HNSW16fb2": 3
+      }
+    }
+  },
+  "D0_local_fallback_no_new": {
+    "k": 5,
+    "natural": {
+      "total_cost": 539649.0,
+      "mean_cost": 1798.83,
+      "mean_recall": 0.9976666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 205,
+        "HNSW16": 95
+      }
+    }
+  },
+  "oracle": {
+    "natural": {
+      "total_cost": 109159.0,
+      "mean_cost": 363.86333333333334,
+      "mean_recall": 0.968,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "always_BF": {
+    "natural": {
+      "total_cost": 1112589.0,
+      "mean_cost": 3708.63,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "gain_B_over_D_natural": 0.5082541772721069,
+  "gain_A_over_C_natural": 0.5082541772721069,
+  "gain_B0_over_D_natural": 2.688896605991505,
+  "config": {
+    "dataset": "fashion",
+    "extra_strategies": [
+      "IVFX",
+      "S2H16",
+      "S2H64"
+    ],
+    "n": 60000,
+    "d": 784,
+    "seed": 0,
+    "centroids": 64,
+    "efs": [
+      16,
+      64,
+      256
+    ],
+    "k": 10,
+    "n_dev": 700,
+    "n_test": {
+      "natural": 300
+    },
+    "python": "3.13.16",
+    "numpy": "2.5.3",
+    "runtime_s": 100.2
+  }
+}
