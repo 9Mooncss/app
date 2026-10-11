@@ -415,3 +415,135 @@ void va4_batch(const float *Xs, int d, int bits, const uint8_t *codes, const int
     }
     free(tA); free(tB); free(T);
 }
+
+/* ---------------------------------------------------------------------------------
+ * H7: arbitrary (scattered) predicates. Rows in ORIGINAL order (no label layout).
+ *   bf_ids_batch   : exact L2 over the allowed id list (gather of float rows).
+ *   va3m_batch     : masked full scan. codesG [n/64 blocks][d][64] in original row order,
+ *                    bitmap = one uint64 per block (bit j = row 64b+j allowed); blocks with
+ *                    a zero word are skipped, disallowed lanes are ignored.
+ *   va3g_batch     : gather. codesR [n][d] row-major; allowed ids are gathered 64 at a
+ *                    time and transposed into a temporary [d][64] block, then scanned.
+ * All exact (same bound + refinement rules as v3).
+ * ------------------------------------------------------------------------------- */
+static float build_table_v3(const float *qv, int d, int C, const float *edges_lo, const float *edges_hi,
+                            float *T, __m512i *tA, __m512i *tB) {
+    __m512 vmax = _mm512_setzero_ps();
+    const __m512 zero = _mm512_setzero_ps();
+    for (int i = 0; i < d; i++) {
+        const __m512 vq = _mm512_set1_ps(qv[i]);
+        for (int c = 0; c < C; c += 16) {
+            __m512 g = _mm512_max_ps(_mm512_max_ps(_mm512_sub_ps(_mm512_loadu_ps(edges_lo + (int64_t)i * C + c), vq),
+                                                   _mm512_sub_ps(vq, _mm512_loadu_ps(edges_hi + (int64_t)i * C + c))), zero);
+            g = _mm512_mul_ps(g, g);
+            _mm512_storeu_ps(T + (int64_t)i * C + c, g);
+            vmax = _mm512_max_ps(vmax, g);
+        }
+    }
+    float tmax = _mm512_reduce_max_ps(vmax);
+    float scale = tmax > 0 ? tmax / 255.f : 1.f, inv = 1.f / scale;
+    const __m512 vinv = _mm512_set1_ps(inv), v255 = _mm512_set1_ps(255.f);
+    for (int i = 0; i < d; i++) {
+        uint8_t row[128] __attribute__((aligned(64))) = {0};
+        const float *Ti = T + (int64_t)i * C;
+        for (int c = 0; c < C; c += 16) {
+            __m512 v = _mm512_min_ps(_mm512_roundscale_ps(_mm512_mul_ps(_mm512_loadu_ps(Ti + c), vinv), _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC), v255);
+            _mm_storeu_si128((__m128i *)(row + c), _mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
+        }
+        if (C < 64) for (int c = C; c < 64; c++) row[c] = row[c % C];
+        tA[i] = _mm512_load_si512(row);
+        tB[i] = _mm512_load_si512(row + 64);
+    }
+    return scale;
+}
+
+/* two-phase refinement shared by H7 kernels: lb (table units) + row ids */
+static int64_t refine_two_phase(const float *X, int d, const float *q, int k, float scale,
+                                uint16_t *lb, int64_t *rows, int64_t ns, topk_t *tk) {
+    int64_t refined = 0;
+    if (ns == 0) return 0;
+    static int64_t hist[65536 >> 4];
+    memset(hist, 0, sizeof(hist));
+    for (int64_t s = 0; s < ns; s++) hist[lb[s] >> 4]++;
+    int64_t acc = 0; int cut = 0;
+    for (; cut < (65536 >> 4); cut++) { acc += hist[cut]; if (acc >= k) break; }
+    uint32_t lim = ((uint32_t)cut + 1) << 4;
+    for (int64_t s = 0; s < ns; s++) if (lb[s] < lim) { tk_push(tk, l2(X + rows[s] * d, q, d), rows[s]); refined++; rows[s] = -1; }
+    for (int64_t s = 0; s < ns; s++) {
+        if (rows[s] < 0) continue;
+        if ((float)lb[s] * scale >= tk_worst(tk)) continue;
+        tk_push(tk, l2(X + rows[s] * d, q, d), rows[s]); refined++;
+    }
+    return refined;
+}
+
+void bf_ids_batch(const float *X, int d, const float *Q, int nq, const int64_t *ids, const int64_t *ioff, int k,
+                  int64_t *out_id, float *out_d, double *t_ns) {
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        topk_t tk; tk_init(&tk, k);
+        for (int64_t a = ioff[qi]; a < ioff[qi + 1]; a++) tk_push(&tk, l2(X + ids[a] * d, q, d), ids[a]);
+        t_ns[qi] = now_ns() - t0;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+}
+
+void va3m_batch(const float *X, int64_t n, int d, int bits, const uint8_t *codesG, const float *edges_lo, const float *edges_hi,
+                const float *Q, int nq, const uint64_t *bitmaps /* [nq][nblocks] */, int k,
+                int64_t *out_id, float *out_d, double *t_ns, int64_t *n_refined, uint16_t *lb_buf, int64_t *row_buf) {
+    const int C = 1 << bits, b7 = bits == 7;
+    const int64_t nb = (n + 63) / 64;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *T = malloc(sizeof(float) * d * C);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        const uint64_t *bm = bitmaps + (int64_t)qi * nb;
+        double t0 = now_ns();
+        float scale = build_table_v3(q, d, C, edges_lo, edges_hi, T, tA, tB);
+        int64_t ns = 0;
+        for (int64_t b = 0; b < nb; b++) {
+            uint64_t w = bm[b];
+            if (!w) continue;
+            uint16_t lb64[64];
+            scan_block64_v3(codesG + b * (int64_t)d * 64, tA, tB, d, b7, lb64);
+            while (w) { int j = __builtin_ctzll(w); w &= w - 1; lb_buf[ns] = lb64[j]; row_buf[ns] = b * 64 + j; ns++; }
+        }
+        topk_t tk; tk_init(&tk, k);
+        n_refined[qi] = refine_two_phase(X, d, q, k, scale, lb_buf, row_buf, ns, &tk);
+        t_ns[qi] = now_ns() - t0;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+    free(tA); free(tB); free(T);
+}
+
+void va3g_batch(const float *X, int d, int bits, const uint8_t *codesR /* [n][d] */, const float *edges_lo, const float *edges_hi,
+                const float *Q, int nq, const int64_t *ids, const int64_t *ioff, int k,
+                int64_t *out_id, float *out_d, double *t_ns, int64_t *n_refined, uint16_t *lb_buf, int64_t *row_buf) {
+    const int C = 1 << bits, b7 = bits == 7;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *T = malloc(sizeof(float) * d * C);
+    uint8_t *blk = aligned_alloc(64, (size_t)d * 64);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        float scale = build_table_v3(q, d, C, edges_lo, edges_hi, T, tA, tB);
+        int64_t ns = 0;
+        for (int64_t a = ioff[qi]; a < ioff[qi + 1]; a += 64) {
+            int m = (int)((ioff[qi + 1] - a) < 64 ? (ioff[qi + 1] - a) : 64);
+            if (m < 64) memset(blk, 0, (size_t)d * 64);
+            for (int j = 0; j < m; j++) {                     /* transpose-gather */
+                const uint8_t *src = codesR + ids[a + j] * (int64_t)d;
+                for (int i = 0; i < d; i++) blk[(int64_t)i * 64 + j] = src[i];
+            }
+            uint16_t lb64[64];
+            scan_block64_v3(blk, tA, tB, d, b7, lb64);
+            for (int j = 0; j < m; j++) { lb_buf[ns] = lb64[j]; row_buf[ns] = ids[a + j]; ns++; }
+        }
+        topk_t tk; tk_init(&tk, k);
+        n_refined[qi] = refine_two_phase(X, d, q, k, scale, lb_buf, row_buf, ns, &tk);
+        t_ns[qi] = now_ns() - t0;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_d[qi * k + i] = i < tk.n ? tk.d[i] : INFINITY; }
+    }
+    free(tA); free(tB); free(T); free(blk);
+}

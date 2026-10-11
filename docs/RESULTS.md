@@ -333,3 +333,31 @@ Speedup over BF, all queries: Fashion 8.9×, GloVe **5.1×** (VA3: 4.0×), spaCy
 synthetic 1M 6.6× (VA3: 6.3×). Mixed: better on GloVe and at high selectivity, worse at s<1% and
 on spaCy (streaming refinement starts with a loose threshold). Rule of thumb: VA3 for small
 allowed sets, VA4 for large.
+
+## Cycle 8 — H7: arbitrary (scattered) predicates — a real limitation
+
+Filter = random row set unrelated to any layout (e.g. access-control lists). Exact kernels
+(`fknn/scattered.py`, `experiments/exp14_scattered.py`): BF over the id list, VA3 masked full
+scan (skip 64-row blocks with an empty bitmap word), VA3 transpose-gather.
+Best VA variant ÷ BF time:
+| s | 0.1% | 0.3% | 1% | 3% | 10% | 30% |
+|---|---|---|---|---|---|---|
+| Fashion | 0.46× | 0.72× | 0.74× | 0.82× | 2.2× | 6.6× |
+| GloVe | 1.19× | 1.38× | 1.37× | 1.51× | 2.0× | 3.6× |
+| spaCy | 0.81× | 0.90× | 0.98× | 1.10× | 2.3× | 7.1× |
+
+**Verdict:** VA3's low-selectivity advantage depends on a filter-aligned layout (codes stored
+contiguously per value of the filtered attribute). For predicates unrelated to the layout, use BF
+below ~3% and the masked VA scan above ~10%. Codes cost d bytes per vector (vs 4d for floats), so
+keeping 2–3 code copies sorted by different attributes is affordable — a design to test next.
+
+## Status after 8 cycles (honest)
+* **Confirmed (measured, exact results verified on every query):** filtered exact k-NN
+  4–9× faster than the strongest contiguous brute force on 4 real/synthetic datasets, in and out
+  of cache; faster than ACORN-γ at recall 0.95 for selectivity < 10%; faster than PDX's filtered
+  exhaustive search 2–9×; kernel competitive with PDX without filters.
+* **Not confirmed / limits:** high selectivity (graphs win, esp. 784-d Fashion); scattered
+  predicates at low selectivity; single machine, single thread; ≤ 1M vectors; no updates tested.
+* **Novelty:** the components are known (VA-file, multi-step k-NN, fast-scan LUTs, VBMI permutes);
+  the specific combination for *exact filtered* search appears unpublished, but that is from a
+  limited search — treat as an engineering contribution, not a theory.

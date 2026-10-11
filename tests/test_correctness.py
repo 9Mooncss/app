@@ -238,3 +238,21 @@ def test_va4_early_abandon_exact_high_dim():
                 _, rd, _ = bruteforce_knn(ds.X, q, li.ids(P), 10)
                 np.testing.assert_allclose(vd4[i], np.sort(rd), rtol=1e-4)
     assert ndims.sum() < len(qs) * 96 * ((nb.max() + 63) // 64) * 2  # sanity: counter is populated
+
+
+def test_scattered_kernels_exact():
+    from fknn.scattered import ScatteredIndex
+    ds = make_dataset(n_clusters=8, per_cluster=500, dim=40, seed=4)
+    si = ScatteredIndex(ds.X, bits=6)
+    rng = np.random.default_rng(0)
+    for s in (0.003, 0.05, 0.5):
+        idl = [np.sort(rng.choice(len(ds.X), max(10, int(s * len(ds.X))), replace=False)) for _ in range(8)]
+        Q = ds.X[rng.choice(len(ds.X), 8)] + 0.05
+        _, bd, _ = si.bf(Q, idl)
+        _, md, _, _ = si.masked(Q, idl)
+        _, gd, _, _ = si.gather(Q, idl)
+        for i, ids in enumerate(idl):
+            ref = np.sort(((ds.X[ids] - Q[i]) ** 2).sum(1))[:10]
+            np.testing.assert_allclose(bd[i], ref, rtol=1e-4)
+            np.testing.assert_allclose(md[i], ref, rtol=1e-4)
+            np.testing.assert_allclose(gd[i], ref, rtol=1e-4)
