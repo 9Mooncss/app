@@ -67,3 +67,55 @@ Compare on the same data, held-out queries:
 Report total cost, mean recall, worst-decile recall. H2 holds if C or D beats B
 by ≥1.3× total cost at equal-or-better recall on **both** geometries. Then
 validate on a real dataset with natural labels before any claim.
+
+## Cycle 2 — Experiment 2 (H2), 2026-10-11
+
+Question: does a cheap *local* selectivity estimate (k-means, 64 centroids,
+per-centroid label histogram; 64 extra distance computations per query) let a
+planner beat the strongest planner that only knows global selectivity?
+
+All planners are the same learner (k-NN regression over dev queries, k chosen by
+leave-one-out); they differ only in features and allowed strategies.
+Fallback = run HNSW with a budget of β·n_allowed distances, on overrun switch to BF.
+Real data: Fashion-MNIST (60k × 784, filter = classes × synthetic price range) and
+GloVe-100 (198k words, filter = frequency-rank range). 700 dev / 300 test queries.
+Synthetic: dev on 3 modes; tests on held-out same modes ("grid") and on an unseen
+"mixed" mode (out of distribution). Files: `results/exp2/<dataset>/`.
+
+Mean distance computations per query on TEST (mean recall@10 in all cells ≥ 0.984):
+
+| dataset / test | A: s only | B: s + fallback | C: local | D: local + fallback | oracle | best of A,B ÷ D |
+|---|---|---|---|---|---|---|
+| synth separated / grid | 9 782 | 6 187 | 5 027 | 5 025 | 4 757 | **1.23×** |
+| synth separated / mixed (OOD) | 13 970 | 13 276 | 11 903 | 11 903 | 10 527 | **1.12×** |
+| synth overlap / grid | 6 024 | 5 047 | 4 467 | 4 485 | 4 066 | **1.13×** |
+| synth overlap / mixed (OOD) | 8 292 | 9 170 | 8 375 | 8 388 | 7 405 | **0.99×** |
+| Fashion-MNIST (real) | 2 116 | 2 233 | 1 799 | 1 799 | 1 634 | **1.18×** |
+| GloVe (real) | 6 445 | 6 509 | 5 987 | 6 040 | 4 253 | **1.07×** |
+
+("best of A,B" is picked on the test set itself, which favours the baseline.)
+
+### Verdict on H2: **not confirmed** (pre-registered bar: ≥1.3× on both geometries)
+* The local feature helps in 5 of 6 tests, by 7–23%, and never hurts recall.
+  On the out-of-distribution "mixed" overlap test it gives nothing (0.99×).
+* The budget-and-fallback baseline is strong on synthetic data, as expected; on real
+  data its extra options did not help the learner (B ≈ A).
+* The realised gain (1.23×) is far below the Experiment 1 ceiling (2.6×) because
+  real planners only see noisy features, and a good fallback already removes most
+  of the catastrophic cases.
+* Headroom left: on GloVe the oracle is 30% cheaper than every planner, so the
+  *strategy set* (not the planner) is now the limit. That motivates Experiment 3.
+
+### Side results from this cycle
+* **Exact cluster pruning (triangle inequality, `fknn/ivf_exact.py`): rejected as a
+  main idea.** Probe: saves 30–36% of BF distances on synthetic data, ~0% on GloVe,
+  and gets worse with more clusters (bounds are weak in high dimension).
+* **Seeding plain hnswlib search near allowed points: no effect.** The best-first
+  rule still expands every non-allowed point closer than the current answers.
+* **Allowed-only 2-hop traversal from cluster seeds (`fknn/seeded.py`, ACORN-1-style
+  on the unmodified hnswlib graph):** probe on synthetic data, s = 5%, neutral
+  correlation: 370 distance computations vs 5 650 for HNSW and 5 015 for BF at
+  recall 0.97, but ~30 000 adjacency entries scanned, and recall collapses under
+  negative correlation (0.2–0.65). This is a known weakness of graph search for
+  out-of-distribution queries (flat distance landscape), so S2H needs a planner
+  to keep it away from those queries → Experiment 3.

@@ -1,0 +1,109 @@
+{
+  "A_s_only": {
+    "k": 150,
+    "natural": {
+      "total_cost": 1933391.0,
+      "mean_cost": 6444.636666666666,
+      "mean_recall": 0.9913333333333333,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.023333333333333334,
+      "strategy_use": {
+        "BF": 213,
+        "HNSW64": 87
+      }
+    }
+  },
+  "B_s_fallback": {
+    "k": 50,
+    "natural": {
+      "total_cost": 1952628.0,
+      "mean_cost": 6508.76,
+      "mean_recall": 0.9916666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.023333333333333334,
+      "strategy_use": {
+        "BF": 189,
+        "HNSW16fb0.25": 17,
+        "HNSW16fb0.5": 6,
+        "HNSW16fb1": 1,
+        "HNSW64": 61,
+        "HNSW64fb1": 26
+      }
+    }
+  },
+  "C_local": {
+    "k": 50,
+    "natural": {
+      "total_cost": 1795978.0,
+      "mean_cost": 5986.593333333333,
+      "mean_recall": 0.9916666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.023333333333333334,
+      "strategy_use": {
+        "BF": 213,
+        "HNSW64": 84,
+        "HNSW256": 3
+      }
+    }
+  },
+  "D_local_fallback": {
+    "k": 50,
+    "natural": {
+      "total_cost": 1812035.0,
+      "mean_cost": 6040.116666666667,
+      "mean_recall": 0.9909999999999999,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.023333333333333334,
+      "strategy_use": {
+        "BF": 178,
+        "HNSW16fb0.25": 16,
+        "HNSW16fb0.5": 22,
+        "HNSW16fb1": 7,
+        "HNSW64": 72,
+        "HNSW64fb1": 1,
+        "HNSW64fb2": 1,
+        "HNSW256": 3
+      }
+    }
+  },
+  "oracle": {
+    "natural": {
+      "total_cost": 1275764.0,
+      "mean_cost": 4252.546666666667,
+      "mean_recall": 0.9863333333333333,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "always_BF": {
+    "natural": {
+      "total_cost": 5115924.0,
+      "mean_cost": 17053.08,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "gain_B_over_D_natural": 1.0775884571765997,
+  "gain_A_over_C_natural": 1.0765115162880614,
+  "config": {
+    "dataset": "glove",
+    "n": 198000,
+    "d": 100,
+    "seed": 0,
+    "centroids": 64,
+    "efs": [
+      16,
+      64,
+      256
+    ],
+    "k": 10,
+    "n_dev": 700,
+    "n_test": {
+      "natural": 300
+    },
+    "python": "3.13.16",
+    "numpy": "2.5.3",
+    "runtime_s": 222.0
+  }
+}
