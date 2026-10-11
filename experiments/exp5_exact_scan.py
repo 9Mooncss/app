@@ -19,7 +19,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from fknn.data import ALL_MODES, make_dataset, make_queries  # noqa: E402
 from fknn.fastscan import FastScanIndex  # noqa: E402
-from fknn.realdata import load_fashion, load_glove, make_real_queries  # noqa: E402
+from fknn.realdata import load_fashion, load_glove, load_spacy, make_real_queries  # noqa: E402
 
 SEL = [0.001, 0.005, 0.01, 0.05, 0.2, 0.5]
 REPS = 3
@@ -30,18 +30,25 @@ def band(s):
 
 
 def workload(name):
+    if name == "synth_big":   # 1M x 128 (512 MB): out-of-cache regime
+        ds = make_dataset(n_clusters=100, per_cluster=10000, dim=128, labels_per_cluster=10, sigma=1.2)
+        qs = [(q, P, m) for i, m in enumerate(ALL_MODES) for j, s in enumerate(SEL)
+              for q, P in make_queries(ds, 25, m, s, 60000 + 31 * i + 7 * j)]
+        return ds.X, ds.labels, ds.n_labels, qs
     if name.startswith("synth"):
         ds = make_dataset(sigma=0.6 if name == "synth_base" else 1.2)
         qs = [(q, P, m) for i, m in enumerate(ALL_MODES) for j, s in enumerate(SEL)
               for q, P in make_queries(ds, 25, m, s, 40000 + 31 * i + 7 * j)]
         return ds.X, ds.labels, ds.n_labels, qs
-    rd = load_fashion() if name == "fashion" else load_glove()
+    rd = {"fashion": load_fashion, "glove": load_glove, "spacy": load_spacy}[name]()
     return rd.X, rd.labels, rd.n_labels, [(q, P, "natural") for q, P in make_real_queries(rd, 600, 50000)]
 
 
 def main():
     out_all = {}
-    for name in ["fashion", "glove", "synth_base", "synth_overlap"]:
+    names = sys.argv[1].split(",") if len(sys.argv) > 1 else ["fashion", "glove", "synth_base", "synth_overlap"]
+    tag = sys.argv[2] if len(sys.argv) > 2 else "exp5"
+    for name in names:
         t0 = time.time()
         X, labels, L, qs = workload(name)
         fs = FastScanIndex(X, labels, L)
@@ -81,8 +88,8 @@ def main():
     out_all["config"] = dict(reps=REPS, k=10, bits=4, python=platform.python_version(), numpy=np.__version__,
                              cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].strip(": "),
                              compiler="gcc -O3 -march=native")
-    os.makedirs("results/exp5", exist_ok=True)
-    with open("results/exp5/summary.json", "w") as f:
+    os.makedirs(f"results/{tag}", exist_ok=True)
+    with open(f"results/{tag}/summary.json", "w") as f:
         json.dump(out_all, f, indent=2)
 
 

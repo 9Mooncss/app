@@ -13,6 +13,9 @@ glove:   GloVe 6B 100-d word vectors (first 200k words, L2-normalised, so L2
          Attribute = frequency rank bucket (rank // 200), a real property:
          the file is sorted by corpus frequency. Filter = random window of buckets
          ("words with frequency rank in [a, b)"), i.e. a range filter.
+spacy:   spaCy en_core_web_lg word vectors (342,918 x 300, L2-normalised), 2,000 held out as
+         queries. No natural attribute is available, so labels are uniform random in 0..999
+         (neutral correlation). Used for the out-of-cache (memory-bound) regime: 411 MB.
 """
 import gzip
 import os
@@ -84,6 +87,19 @@ def load_glove(n_words=200_000) -> RealDataset:
     return RealDataset("glove", vecs[~is_q], bucket[~is_q], n_words // 200, vecs[is_q], bucket[is_q])
 
 
+def load_spacy(seed=0) -> RealDataset:
+    path = os.path.join(CACHE, "spacy_lg_vectors.npy")
+    if not os.path.exists(path):
+        raise FileNotFoundError("extract vocab/vectors from the en_core_web_lg-3.8.0 wheel into " + path)
+    V = np.load(path).astype(np.float32)
+    V /= np.linalg.norm(V, axis=1, keepdims=True) + 1e-12
+    rng = np.random.default_rng(seed)
+    is_q = np.zeros(len(V), bool)
+    is_q[rng.choice(len(V), 2000, replace=False)] = True
+    labels = rng.integers(0, 1000, size=len(V)).astype(np.int32)
+    return RealDataset("spacy", V[~is_q], labels[~is_q], 1000, V[is_q], labels[is_q])
+
+
 def make_real_queries(ds: RealDataset, n_queries: int, seed: int):
     """Random filters; correlation with the query is whatever the data implies."""
     rng = np.random.default_rng(seed)
@@ -95,7 +111,7 @@ def make_real_queries(ds: RealDataset, n_queries: int, seed: int):
             w = int(np.clip(round(10 ** rng.uniform(0, 2)), 1, 100))
             a = rng.integers(0, 100 - w + 1)
             P = (classes[:, None] * 100 + np.arange(a, a + w)[None, :]).ravel()
-        else:
+        else:  # glove (frequency-rank range) and spacy (random labels): a window of labels
             L = ds.n_labels
             w = int(np.clip(round(10 ** rng.uniform(0, np.log10(L / 2))), 1, L))
             a = rng.integers(0, L - w + 1)
