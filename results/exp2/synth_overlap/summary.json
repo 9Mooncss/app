@@ -1,0 +1,187 @@
+{
+  "A_s_only": {
+    "k": 15,
+    "grid": {
+      "total_cost": 3252823.0,
+      "mean_cost": 6023.746296296296,
+      "mean_recall": 0.9946296296296296,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.012962962962962963,
+      "strategy_use": {
+        "BF": 425,
+        "HNSW16": 4,
+        "HNSW64": 45,
+        "HNSW256": 66
+      }
+    },
+    "mixed": {
+      "total_cost": 4477576.0,
+      "mean_cost": 8291.807407407407,
+      "mean_recall": 0.9883333333333334,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.022222222222222223,
+      "strategy_use": {
+        "BF": 450,
+        "HNSW256": 90
+      }
+    }
+  },
+  "B_s_fallback": {
+    "k": 15,
+    "grid": {
+      "total_cost": 2725340.0,
+      "mean_cost": 5046.925925925926,
+      "mean_recall": 0.9890740740740741,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.020370370370370372,
+      "strategy_use": {
+        "BF": 281,
+        "HNSW16": 4,
+        "HNSW16fb0.25": 9,
+        "HNSW16fb0.5": 2,
+        "HNSW16fb1": 10,
+        "HNSW64": 39,
+        "HNSW64fb0.25": 99,
+        "HNSW64fb0.5": 29,
+        "HNSW64fb1": 1,
+        "HNSW256": 66
+      }
+    },
+    "mixed": {
+      "total_cost": 4952005.5,
+      "mean_cost": 9170.380555555555,
+      "mean_recall": 0.9875925925925925,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.024074074074074074,
+      "strategy_use": {
+        "BF": 285,
+        "HNSW16fb0.25": 7,
+        "HNSW16fb0.5": 4,
+        "HNSW64fb0.25": 133,
+        "HNSW64fb0.5": 21,
+        "HNSW256": 90
+      }
+    }
+  },
+  "C_local": {
+    "k": 15,
+    "grid": {
+      "total_cost": 2412053.0,
+      "mean_cost": 4466.764814814815,
+      "mean_recall": 0.9864814814814815,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.025925925925925925,
+      "strategy_use": {
+        "BF": 342,
+        "HNSW16": 38,
+        "HNSW64": 132,
+        "HNSW256": 28
+      }
+    },
+    "mixed": {
+      "total_cost": 4522757.0,
+      "mean_cost": 8375.475925925926,
+      "mean_recall": 0.9862962962962963,
+      "p10_recall": 0.9900000000000005,
+      "frac_recall_below_ok": 0.027777777777777776,
+      "strategy_use": {
+        "BF": 442,
+        "HNSW64": 16,
+        "HNSW256": 82
+      }
+    }
+  },
+  "D_local_fallback": {
+    "k": 15,
+    "grid": {
+      "total_cost": 2422108.0,
+      "mean_cost": 4485.385185185185,
+      "mean_recall": 0.9862962962962961,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.025925925925925925,
+      "strategy_use": {
+        "BF": 337,
+        "HNSW16": 32,
+        "HNSW16fb0.25": 4,
+        "HNSW16fb0.5": 1,
+        "HNSW16fb1": 6,
+        "HNSW64": 131,
+        "HNSW256": 27,
+        "HNSW256fb1": 1,
+        "HNSW256fb2": 1
+      }
+    },
+    "mixed": {
+      "total_cost": 4529563.0,
+      "mean_cost": 8388.07962962963,
+      "mean_recall": 0.9844444444444445,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.03518518518518519,
+      "strategy_use": {
+        "BF": 421,
+        "HNSW16fb0.25": 11,
+        "HNSW64": 16,
+        "HNSW64fb0.5": 7,
+        "HNSW256": 72,
+        "HNSW256fb1": 13
+      }
+    }
+  },
+  "oracle": {
+    "grid": {
+      "total_cost": 2195467.0,
+      "mean_cost": 4065.6796296296297,
+      "mean_recall": 0.983888888888889,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.0
+    },
+    "mixed": {
+      "total_cost": 3998751.0,
+      "mean_cost": 7405.094444444445,
+      "mean_recall": 0.9848148148148147,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "always_BF": {
+    "grid": {
+      "total_cost": 6893677.0,
+      "mean_cost": 12766.06851851852,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    },
+    "mixed": {
+      "total_cost": 6893748.0,
+      "mean_cost": 12766.2,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "gain_B_over_D_grid": 1.1251934265524082,
+  "gain_A_over_C_grid": 1.3485702843179648,
+  "gain_B_over_D_mixed": 1.0932634119450375,
+  "gain_A_over_C_mixed": 0.9900102968167426,
+  "config": {
+    "dataset": "synth_overlap",
+    "n": 100000,
+    "d": 64,
+    "seed": 0,
+    "centroids": 64,
+    "efs": [
+      16,
+      64,
+      256
+    ],
+    "k": 10,
+    "n_dev": 1260,
+    "n_test": {
+      "grid": 540,
+      "mixed": 540
+    },
+    "python": "3.13.16",
+    "numpy": "2.5.3",
+    "runtime_s": 275.9
+  }
+}
