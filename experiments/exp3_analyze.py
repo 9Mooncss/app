@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 import exp2_h2 as E  # noqa: E402
 
-ROOT = os.path.join("results", "exp3")
+ROOT = os.path.join("results", "exp3")  # written by: exp2_h2.py --new-strategies --tag 3, then renamed
 
 
 def load(path):

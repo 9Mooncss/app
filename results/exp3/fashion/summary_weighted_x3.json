@@ -1,0 +1,122 @@
+{
+  "A_s_only": {
+    "k": 50,
+    "natural": {
+      "total_cost": 148144.04599999997,
+      "mean_cost": 493.81348666666656,
+      "mean_recall": 0.9783333333333335,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05,
+      "strategy_use": {
+        "BF": 52,
+        "IVFX": 66,
+        "S2H16": 45,
+        "S2H64": 137
+      }
+    }
+  },
+  "B_s_fallback": {
+    "k": 50,
+    "natural": {
+      "total_cost": 148144.04599999997,
+      "mean_cost": 493.81348666666656,
+      "mean_recall": 0.9783333333333335,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05,
+      "strategy_use": {
+        "BF": 52,
+        "IVFX": 66,
+        "S2H16": 45,
+        "S2H64": 137
+      }
+    }
+  },
+  "C_local": {
+    "k": 5,
+    "natural": {
+      "total_cost": 263746.39,
+      "mean_cost": 879.1546333333334,
+      "mean_recall": 0.9766666666666667,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05333333333333334,
+      "strategy_use": {
+        "BF": 38,
+        "HNSW16": 16,
+        "IVFX": 100,
+        "S2H16": 67,
+        "S2H64": 79
+      }
+    }
+  },
+  "D_local_fallback": {
+    "k": 5,
+    "natural": {
+      "total_cost": 263746.39,
+      "mean_cost": 879.1546333333334,
+      "mean_recall": 0.9766666666666667,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.05333333333333334,
+      "strategy_use": {
+        "BF": 38,
+        "HNSW16": 16,
+        "IVFX": 100,
+        "S2H16": 67,
+        "S2H64": 79
+      }
+    }
+  },
+  "B0_s_fallback_no_new": {
+    "k": 15,
+    "natural": {
+      "total_cost": 669766.5,
+      "mean_cost": 2232.555,
+      "mean_recall": 0.9966666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 211,
+        "HNSW16": 48,
+        "HNSW16fb0.25": 17,
+        "HNSW16fb0.5": 10,
+        "HNSW16fb1": 11,
+        "HNSW16fb2": 3
+      }
+    }
+  },
+  "D0_local_fallback_no_new": {
+    "k": 5,
+    "natural": {
+      "total_cost": 539649.0,
+      "mean_cost": 1798.83,
+      "mean_recall": 0.9976666666666667,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0033333333333333335,
+      "strategy_use": {
+        "BF": 205,
+        "HNSW16": 95
+      }
+    }
+  },
+  "oracle": {
+    "natural": {
+      "total_cost": 122770.265,
+      "mean_cost": 409.23421666666667,
+      "mean_recall": 0.9710000000000001,
+      "p10_recall": 0.9,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "always_BF": {
+    "natural": {
+      "total_cost": 1112589.0,
+      "mean_cost": 3708.63,
+      "mean_recall": 1.0,
+      "p10_recall": 1.0,
+      "frac_recall_below_ok": 0.0
+    }
+  },
+  "gain_B_over_D_natural": 0.5616912747128026,
+  "gain_A_over_C_natural": 0.5616912747128026,
+  "gain_B0_over_D_natural": 2.539433809880772,
+  "edge_weight": 0.009000000000000001
+}

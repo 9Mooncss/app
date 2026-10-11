@@ -34,7 +34,7 @@ from fknn.seeded import SeedPicker, acorn_like_search, seeded_2hop_search  # noq
 K = 10
 HNSW_EFS = [10, 16, 32, 64, 128, 256]
 GRAPH_EFS = [10, 16, 32, 64, 128]
-W = {"synth_base": 0.046, "synth_overlap": 0.046, "fashion": 0.003, "glove": 0.021}
+W = {"synth_base": 0.067, "synth_overlap": 0.067, "fashion": 0.003, "glove": 0.021}  # worst measured
 SEL = [0.001, 0.005, 0.01, 0.05, 0.2, 0.5]
 G = {}
 
