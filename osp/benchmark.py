@@ -42,8 +42,18 @@ def main():
         for idx in range(lo, hi + 1):
             for s in range(seeds):
                 tasks.append((uc, idx, files[idx], t, 100 + s, params))
-    with mp.Pool(4) as pool:
-        res = pool.map(job, tasks, chunksize=1)
+    cache = out.replace(".json", ".runs.jsonl")
+    done = {}
+    if os.path.exists(cache):
+        for line in open(cache):
+            r = json.loads(line)
+            done[(r[0], r[1], r[2])] = r
+    todo = [a for a in tasks if (a[0], a[1], a[4]) not in done]
+    with mp.Pool(4) as pool, open(cache, "a") as f:
+        for r in pool.imap_unordered(job, todo, chunksize=1):
+            f.write(json.dumps(list(r)) + "\n"); f.flush()
+            done[(r[0], r[1], r[2])] = list(r)
+    res = [done[(a[0], a[1], a[4])] for a in tasks]
     rows = []
     for uc in (1, 2, 3):
         pub = published(uc)
