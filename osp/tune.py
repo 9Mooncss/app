@@ -35,7 +35,11 @@ def job(args):
 def main():
     out, t = sys.argv[1], float(sys.argv[2])
     insts = tuning_instances()
-    grid = [(a, b) for a, b in itertools.product([0.005, 0.02, 0.05], [2e-6, 2e-5, 2e-4])]
+    import os
+    t0s = [float(x) for x in os.environ.get("T0S", "0.005,0.02,0.05").split(",")]
+    tes = [float(x) for x in os.environ.get("TES", "2e-6,2e-5,2e-4").split(",")]
+    extra = [float(x) for x in os.environ.get("RATES", "").split(",") if x]
+    grid = [tuple([a, b] + extra) for a, b in itertools.product(t0s, tes)]
     tasks = [(p, list(c), t) for p in insts for c in grid]
     with mp.Pool(4) as pool:
         res = pool.map(job, tasks, chunksize=1)
