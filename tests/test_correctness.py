@@ -1,6 +1,13 @@
 import numpy as np
 import pytest
 
+try:
+    _FLAGS = open("/proc/cpuinfo").read()
+except OSError:
+    _FLAGS = ""
+HAS_VBMI = "avx512vbmi" in _FLAGS and "avx512bw" in _FLAGS
+needs_vbmi = pytest.mark.skipif(not HAS_VBMI, reason="C kernels need AVX-512 BW+VBMI")
+
 from fknn.bruteforce import LabelIndex, bruteforce_knn
 from fknn.data import MODES, make_dataset, make_queries
 from fknn.hnsw_build import build
@@ -180,6 +187,7 @@ def test_va_bound_exact(small, rotate, int8):
     assert np.all(lb <= ((ds.X - q) ** 2).sum(1) * (1 + 1e-4) + 1e-4)
 
 
+@needs_vbmi
 def test_fastscan_c_exact(small):
     from fknn.fastscan import FastScanIndex
     ds, li = small
@@ -221,6 +229,7 @@ def test_pcava_exact(small):
                 np.testing.assert_allclose(np.sort(gd), np.sort(rd), rtol=1e-4)
 
 
+@needs_vbmi
 def test_va4_early_abandon_exact_high_dim():
     """d=96 so the every-32-dims abandon check actually fires."""
     from fknn.fastscan import FastScanIndex
@@ -240,6 +249,7 @@ def test_va4_early_abandon_exact_high_dim():
     assert ndims.sum() < len(qs) * 96 * ((nb.max() + 63) // 64) * 2  # sanity: counter is populated
 
 
+@needs_vbmi
 def test_scattered_kernels_exact():
     from fknn.scattered import ScatteredIndex
     ds = make_dataset(n_clusters=8, per_cluster=500, dim=40, seed=4)
@@ -258,6 +268,7 @@ def test_scattered_kernels_exact():
             np.testing.assert_allclose(gd[i], ref, rtol=1e-4)
 
 
+@needs_vbmi
 @pytest.mark.parametrize("bits", [4, 6, 7])
 def test_mips_exact(bits):
     from fknn.mips import MipsIndex

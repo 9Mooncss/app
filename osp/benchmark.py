@@ -11,7 +11,8 @@ import pandas as pd
 from .fast import solve
 from .instance import instance_files
 
-ROOT = "/tmp/claude-0/-home-user-app/1282557a-9b1d-593e-89bf-391d46ab0c81/scratchpad/osp-ls"
+import os as _os
+ROOT = _os.environ.get("OSP_LS_ROOT", _os.path.join(_os.path.dirname(__file__), "..", "external", "osp-ls"))
 T0F, TEF = 0.005, 2e-6   # overwritten by env after tuning
 
 

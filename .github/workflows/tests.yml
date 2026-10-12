@@ -1,0 +1,24 @@
+name: tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: System packages
+        run: sudo apt-get update -q && sudo apt-get install -y -q libboost-program-options-dev
+      - name: Python packages
+        run: pip install -r requirements.txt
+      - name: CPU features
+        run: grep -o -w -E "avx2|avx512bw|avx512vbmi" /proc/cpuinfo | sort | uniq -c || true
+      - name: OSP benchmark + reference solver
+        run: scripts/setup_osp_ls.sh external/osp-ls
+      - name: Tests (exactness of every kernel, OSP evaluator vs reference solver)
+        run: python -m pytest -q tests

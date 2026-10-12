@@ -1,0 +1,54 @@
+name: osp-equal-time-benchmark
+# Our OSP solver vs the authors' SA at EQUAL wall time, both run inside the same job (same CPU),
+# on all 120 held-out large instances (81-120 of 3 use cases), split over 12 parallel jobs.
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "wall time per run (s), same for both solvers"
+        default: "30"
+      seeds:
+        description: "seeds per instance"
+        default: "3"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libboost-program-options-dev
+      - run: pip install numpy==2.5.3 pandas==3.0.5
+      - run: scripts/setup_osp_ls.sh external/osp-ls
+      - run: lscpu | grep -E "Model name|^CPU\(s\)"
+      - name: Equal-time runs
+        env:
+          WORKERS: "2"
+        run: python -m osp.equal_time eq_${{ matrix.chunk }}.json ${{ inputs.seconds }} ${{ inputs.seeds }} ${{ matrix.chunk }} 12
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eq-${{ matrix.chunk }}
+          path: eq_${{ matrix.chunk }}.json
+  summary:
+    needs: run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install numpy==2.5.3 pandas==3.0.5
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - run: python -m osp.aggregate_equal_time parts summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: summary
+          path: summary.json

@@ -3,3 +3,4 @@ __pycache__/
 results/cache/
 results/log_*.txt
 osp/cpp/solver
+external/

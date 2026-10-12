@@ -1,0 +1,11 @@
+{"solution": {"batch_for_job": [2,2,4,6,1,4,5,1,1,5,5,3,1,4,6,2,2,4,7,5,2,4,5,3,3,],
+"machine_for_job": [1,2,1,2,1,1,2,1,2,1,1,1,2,2,2,2,1,2,2,1,2,1,1,2,1,],
+"start_time": [416,503,618,689,731,4305,4405,4483,4510,4566,4686,4751,],
+"batch_processing_time": [72,100,47,34,74,76,70,3,32,96,41,14,],
+"tardy_jobs_are": [2,3,4,6,7,9,10,13,14,15,16,17,18,19,20,21,22,23,24,25,],
+"n_tardy_jobs": 20,
+"cumulative_processing_times": 659,
+"set_up_costs": 168,
+"n_not_scheduled_jobs": 0
+}}
+{"total_cost": 297252, "time_seconds": 0.482492, "total_iterations": 100000, "iteration_of_best": 18244, "seed": 1} 

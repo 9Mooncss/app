@@ -12,7 +12,8 @@ import numpy as np
 from .fast import solve
 from .instance import load
 
-SRC = "/tmp/claude-0/-home-user-app/1282557a-9b1d-593e-89bf-391d46ab0c81/scratchpad/osp-ls/instances"
+from .benchmark import ROOT
+SRC = ROOT + "/instances"
 
 
 def tuning_instances():
