@@ -1,0 +1,40 @@
+{
+  "time": 30.0,
+  "seeds": 3,
+  "params": [
+    0.002,
+    6e-07
+  ],
+  "summary": {
+    "1": {
+      "n": 40,
+      "mean_rel_ours_mean_vs_sa_mean": -0.008494138492078588,
+      "mean_rel_ours_min_vs_best_published": -0.005366567953330247,
+      "ours_mean_better_than_sa_mean": 39,
+      "ours_mean_worse_than_sa_mean": 0,
+      "new_best_known": 35,
+      "matched_best_known": 2,
+      "sa_mean_time_s": 508.6899434027779
+    },
+    "2": {
+      "n": 40,
+      "mean_rel_ours_mean_vs_sa_mean": -0.04951108074291101,
+      "mean_rel_ours_min_vs_best_published": -0.0336920125488663,
+      "ours_mean_better_than_sa_mean": 38,
+      "ours_mean_worse_than_sa_mean": 1,
+      "new_best_known": 35,
+      "matched_best_known": 0,
+      "sa_mean_time_s": 453.17413500000004
+    },
+    "3": {
+      "n": 40,
+      "mean_rel_ours_mean_vs_sa_mean": -0.0098391304450449,
+      "mean_rel_ours_min_vs_best_published": -0.007374451690473238,
+      "ours_mean_better_than_sa_mean": 38,
+      "ours_mean_worse_than_sa_mean": 1,
+      "new_best_known": 36,
+      "matched_best_known": 1,
+      "sa_mean_time_s": 466.7963425
+    }
+  }
+}
