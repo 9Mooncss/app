@@ -403,3 +403,41 @@ Exact CPU MIPS with VA bounds is ~1–1.4× vs batched BLAS on real data (GloVe,
 attention keys) and 0.3× on spaCy. Only the single-query (online) case gains ~2–4× over gemv,
 which is a narrow niche (and LLM attention runs on GPUs, where this kernel does not apply).
 Lesson recorded: synthetic data I design myself can manufacture a win; always validate on real data.
+
+## Cycle 10 — Oven Scheduling Problem: a confirmed algorithmic advantage
+
+Problem, data and plan: `docs/OSP_PLAN.md`. Competitor: the authors' multi-neighbourhood simulated
+annealing (Da Ros et al., GECCO'24 / C&OR'25), the best published method on large instances, plus
+published LNS/CP/ILP results (github.com/iolab-uniud/osp-ls).
+
+### Method (`osp/cpp/solver.cpp`)
+Simulated annealing with the same move types as the authors (+ job swap), but with an
+**O(changed-suffix) incremental evaluation with early re-synchronisation**: a move only re-simulates
+the affected machine from the first changed batch, and stops as soon as the state entering an
+unchanged batch (previous end time, attribute, scheduled flag) equals the old one — the rest of the
+cost is read from stored prefix sums. Result: ~0.5–9 M moves/s vs ~7–75 k/s for the reference
+implementation on the same instances (≈70–120× more moves per second). Every final solution is
+re-evaluated by an independent Python port of the authors' cost (`osp/instance.py`), which matches
+their solver exactly on 12/12 reference solutions. Temperatures tuned only on the separate
+`tuning-use-case-*` instances (flat optimum, ±0.1%).
+
+### Held-out results — instances 81–120 (250 and 500 jobs), all 3 use cases, 30 s × 3 seeds
+(`results/osp/bench_30s.csv`; published SA = 5 M evaluations, 300–900 s on the authors' machine)
+| use case | ours (mean of 3) better than published SA mean | new best-known solutions | mean improvement vs SA mean |
+|---|---|---|---|
+| 1 | 39 / 40 | 35 / 40 | 0.85% |
+| 2 | 38 / 40 | 35 / 40 | 4.95% |
+| 3 | 38 / 40 | 36 / 40 | 0.98% |
+| **all** | **115 / 120** | **106 / 120** | |
+"New best-known" = better than every published method (best SA seed, LNS, CP, ILP).
+
+### Fairness checks on THIS machine (12 instances, `results/osp/their_*.json`)
+* Their solver here is 1.56× faster than in the paper; with our parameter reconstruction it
+  reproduces the published mean quality (e.g. 0.96657 vs 0.96670; 0.65793 vs 0.65745).
+* **Equal time (30 s each, their evaluation budget scaled to 30 s):** ours better on **12/12**, mean −1.85%.
+* **Ours 30 s vs their full 5 M-evaluation runs here (225–540 s):** ours better on **12/12**, mean −0.95%.
+  → same-or-better quality in **1/8 – 1/18 of the time**.
+
+Caveats: the absolute improvements are ~1% (use cases 1, 3) to ~5% (use case 2) of the objective;
+we have not yet compared against the published lower bounds (arXiv 2410.01368), so the remaining
+optimality gap is unknown; the authors' exact tuned parameters were not in the repo (reconstructed).

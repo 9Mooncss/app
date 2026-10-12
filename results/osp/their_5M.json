@@ -1,0 +1,122 @@
+[
+  {
+    "uc": 1,
+    "instance": 85,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.7671111111111111,
+    "time": 268.764,
+    "published_sa_mean": 0.7729063492063493,
+    "published_sa_time": 470.2435
+  },
+  {
+    "uc": 1,
+    "instance": 95,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.9665711034099175,
+    "time": 233.958,
+    "published_sa_mean": 0.9667016386428784,
+    "published_sa_time": 379.363
+  },
+  {
+    "uc": 1,
+    "instance": 105,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.9744920634920635,
+    "time": 538.348,
+    "published_sa_mean": 0.9743777777777778,
+    "published_sa_time": 922.245625
+  },
+  {
+    "uc": 1,
+    "instance": 115,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.9729269841269841,
+    "time": 474.604,
+    "published_sa_mean": 0.9728619047619048,
+    "published_sa_time": 811.7525
+  },
+  {
+    "uc": 2,
+    "instance": 85,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.581801692006503,
+    "time": 260.948,
+    "published_sa_mean": 0.5934797099826599,
+    "published_sa_time": 415.68140000000005
+  },
+  {
+    "uc": 2,
+    "instance": 95,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.6209544088341162,
+    "time": 228.907,
+    "published_sa_mean": 0.624023655834379,
+    "published_sa_time": 343.4836
+  },
+  {
+    "uc": 2,
+    "instance": 105,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.5558754655696457,
+    "time": 538.853,
+    "published_sa_mean": 0.5589756810753295,
+    "published_sa_time": 837.031
+  },
+  {
+    "uc": 2,
+    "instance": 115,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.5496933632349754,
+    "time": 474.671,
+    "published_sa_mean": 0.5548329174414394,
+    "published_sa_time": 710.1003000000001
+  },
+  {
+    "uc": 3,
+    "instance": 85,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.6176,
+    "time": 255.887,
+    "published_sa_mean": 0.6149866666666667,
+    "published_sa_time": 393.4826
+  },
+  {
+    "uc": 3,
+    "instance": 95,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.6856460017969452,
+    "time": 223.853,
+    "published_sa_mean": 0.6870891644204852,
+    "published_sa_time": 375.7712
+  },
+  {
+    "uc": 3,
+    "instance": 105,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.6579333333333334,
+    "time": 525.878,
+    "published_sa_mean": 0.6574466666666667,
+    "published_sa_time": 777.0703000000001
+  },
+  {
+    "uc": 3,
+    "instance": 115,
+    "evals": 5000000,
+    "seed": 1,
+    "normalized": 0.6148,
+    "time": 464.522,
+    "published_sa_mean": 0.6145333333333334,
+    "published_sa_time": 718.6306000000001
+  }
+]
