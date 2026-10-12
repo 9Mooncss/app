@@ -1,0 +1,12 @@
+T0=0.002  Tend=6e-07   mean rel gap 0.0021
+T0=0.0005 Tend=6e-07   mean rel gap 0.0022
+T0=0.0005 Tend=2e-06   mean rel gap 0.0025
+T0=0.005  Tend=2e-06   mean rel gap 0.0026
+T0=0.005  Tend=2e-07   mean rel gap 0.0027
+T0=0.001  Tend=6e-07   mean rel gap 0.0028
+T0=0.0005 Tend=2e-07   mean rel gap 0.0029
+T0=0.005  Tend=6e-07   mean rel gap 0.0029
+T0=0.002  Tend=2e-06   mean rel gap 0.0030
+T0=0.002  Tend=2e-07   mean rel gap 0.0030
+T0=0.001  Tend=2e-07   mean rel gap 0.0031
+T0=0.001  Tend=2e-06   mean rel gap 0.0032
