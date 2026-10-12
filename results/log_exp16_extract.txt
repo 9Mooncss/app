@@ -1,0 +1,13 @@
+1926 docstrings, 108501 tokens, 212 chunks
+chunk 0 4s
+chunk 20 90s
+chunk 40 175s
+chunk 60 259s
+chunk 80 340s
+chunk 100 422s
+chunk 120 505s
+chunk 140 589s
+chunk 160 673s
+chunk 180 756s
+chunk 200 840s
+{'K_l1_h0': (102400, 64), 'Q_l1_h0': (6144, 64), 'K_l6_h3': (102400, 64), 'Q_l6_h3': (6144, 64), 'K_l10_h7': (102400, 64), 'Q_l10_h7': (6144, 64)}

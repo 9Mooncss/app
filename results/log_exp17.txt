@@ -1,0 +1,6 @@
+l10_h7: keys (102400, 64), key-norm p5/p50/p95 [10.13 12.54 15.57]
+[attn_l10_h7] n=102400 d=64 | BF-C 2844us | BLAS gemv 1425us | BLAS gemm/q 755us | BF+norm-stop 2642us (scan 1.00) | VA 728us | VA+norm-stop 653us (blocks 1.00) | VA vs best exact 1.16x
+l1_h0: keys (102400, 64), key-norm p5/p50/p95 [12.16 14.28 16.74]
+[attn_l1_h0] n=102400 d=64 | BF-C 2676us | BLAS gemv 1544us | BLAS gemm/q 787us | BF+norm-stop 2747us (scan 1.00) | VA 743us | VA+norm-stop 685us (blocks 1.00) | VA vs best exact 1.15x
+l6_h3: keys (102400, 64), key-norm p5/p50/p95 [14.05 16.37 18.55]
+[attn_l6_h3] n=102400 d=64 | BF-C 2644us | BLAS gemv 1292us | BLAS gemm/q 710us | BF+norm-stop 2783us (scan 1.00) | VA 849us | VA+norm-stop 802us (blocks 1.00) | VA vs best exact 0.88x

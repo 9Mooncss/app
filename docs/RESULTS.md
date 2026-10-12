@@ -385,3 +385,21 @@ Verdict so far: **fails the 2× bar on real data.** Batched BLAS is very strong 
 single-query (online) case is better for VA (2.5–4× over gemv on GloVe/spaCy). The only pass is
 my own synthetic attention data, whose outlier channels I chose — not evidence. Next: real
 attention keys from a real transformer (RoBERTa weights inside spaCy en_core_web_trf, run in numpy).
+
+### Experiment 16–17 — REAL attention keys (RoBERTa-base from spaCy en_core_web_trf, numpy forward)
+Sanity: the largest hidden-state channels include 77 and 588, the known RoBERTa-base outlier
+dimensions. 102 400 keys per head (200 chunks × 512 tokens of Python-stdlib docstrings),
+queries from 12 held-out chunks. Single thread, mean µs/query:
+| layer/head | BF (C) | BLAS gemv | BLAS gemm/q | VA | VA + norm stop | vs best exact |
+|---|---|---|---|---|---|---|
+| L1 H0 | 2 676 | 1 544 | 787 | 743 | **685** | 1.15× |
+| L6 H3 | 2 644 | 1 292 | **710** | 849 | 802 | 0.88× |
+| L10 H7 | 2 844 | 1 425 | 755 | 728 | **653** | 1.16× |
+Real key norms are nearly uniform (p5–p95 ≈ 10–18), so the norm stop prunes nothing, and the
+synthetic "attention" result (3.64×) does **not** transfer — it was an artefact of my generator.
+
+### Verdict on Cycle 9 (pre-registered ≥ 2× bar): **direction closed.**
+Exact CPU MIPS with VA bounds is ~1–1.4× vs batched BLAS on real data (GloVe, spaCy, real
+attention keys) and 0.3× on spaCy. Only the single-query (online) case gains ~2–4× over gemv,
+which is a narrow niche (and LLM attention runs on GPUs, where this kernel does not apply).
+Lesson recorded: synthetic data I design myself can manufacture a win; always validate on real data.
