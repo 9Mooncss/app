@@ -127,3 +127,15 @@ def evaluate(inst, schedule):
              + 2 * inst.ub * unsched)
     return dict(total=int(total), normalized=total / inst.ub, setup_cost=int(setupcost), tardy=tardy,
                 runtime=runtime, unscheduled=unsched, violations=viol)
+
+
+def instance_files(directory):
+    """{instance number: path} using the numeric prefix of the file name (NOT alphabetical order)."""
+    import glob
+    import os
+    out = {}
+    for p in glob.glob(os.path.join(directory, "*.dzn")):
+        m = re.match(r"(\d+)", os.path.basename(p))
+        if m:
+            out[int(m.group(1))] = p
+    return out

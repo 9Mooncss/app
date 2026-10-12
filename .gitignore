@@ -2,3 +2,4 @@ __pycache__/
 .pytest_cache/
 results/cache/
 results/log_*.txt
+osp/cpp/solver
