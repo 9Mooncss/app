@@ -43,9 +43,9 @@ def datasets():
     yield "synth_attn_300k", K_, Qa
 
 
-def main():
-    out = {}
-    for name, X, Q in datasets():
+def bench_one(name, X, Q):
+    """All exact MIPS baselines + VA variants on one (database, queries) pair; returns a dict."""
+    if True:
         X = np.ascontiguousarray(X, np.float32); Q = np.ascontiguousarray(Q, np.float32)
         mi = MipsIndex(X, bits=6)
         mn = MipsIndex(X, bits=6, norm_order=True)
@@ -77,11 +77,16 @@ def main():
              "va_norm_stop_us": tvn.mean() / 1e3, "va_norm_blocks_frac": nblk.mean() / ((X.shape[0] + 63) // 64)}
         best_exact = min(r["bf_c_us"], r["blas_gemv_us"], r["blas_gemm_per_query_us"], r["bf_norm_stop_us"])
         r["speedup_vs_best_exact"] = best_exact / min(r["va_us"], r["va_norm_stop_us"])
-        out[name] = {k: float(v) for k, v in r.items()}
+        res = {k: float(v) for k, v in r.items()}
         print(f"[{name}] n={r['n']} d={r['d']} | BF-C {r['bf_c_us']:.0f}us | BLAS gemv {r['blas_gemv_us']:.0f}us | "
               f"BLAS gemm/q {r['blas_gemm_per_query_us']:.0f}us | BF+norm-stop {r['bf_norm_stop_us']:.0f}us (scan {r['bf_norm_scanned_frac']:.2f}) | "
               f"VA {r['va_us']:.0f}us | VA+norm-stop {r['va_norm_stop_us']:.0f}us (blocks {r['va_norm_blocks_frac']:.2f}) | "
               f"VA vs best exact {r['speedup_vs_best_exact']:.2f}x", flush=True)
+    return res
+
+
+def main():
+    out = {name: bench_one(name, X, Q) for name, X, Q in datasets()}
     os.makedirs("results/exp15", exist_ok=True)
     json.dump(out, open("results/exp15/summary.json", "w"), indent=2)
 
