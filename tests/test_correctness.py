@@ -256,3 +256,27 @@ def test_scattered_kernels_exact():
             np.testing.assert_allclose(bd[i], ref, rtol=1e-4)
             np.testing.assert_allclose(md[i], ref, rtol=1e-4)
             np.testing.assert_allclose(gd[i], ref, rtol=1e-4)
+
+
+@pytest.mark.parametrize("bits", [4, 6, 7])
+def test_mips_exact(bits):
+    from fknn.mips import MipsIndex
+    rng = np.random.default_rng(1)
+    X = (rng.normal(size=(5000, 48)) * rng.pareto(3, size=(5000, 1))).astype(np.float32)   # varying norms
+    X[:, 3] *= 8                                                                         # an outlier channel
+    Q = rng.normal(size=(30, 48)).astype(np.float32)
+    mi = MipsIndex(X, bits=bits)
+    _, bs, _ = mi.bf(Q)
+    _, vs, _, nr = mi.va(Q)
+    ref = -np.sort(-(Q @ X.T), axis=1)[:, :10]
+    np.testing.assert_allclose(bs, ref, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(vs, ref, rtol=1e-4, atol=1e-4)
+    # the bound must really be an upper bound: reconstruct via a tiny check on refined counts
+    assert np.all(nr >= 10) and np.all(nr <= len(X))
+    mn = MipsIndex(X, bits=bits, norm_order=True)
+    _, s1, _, _ = mn.bf_norm(Q)
+    _, s2, _, _, _ = mn.va_norm(Q)
+    _, s3, _ = mn.bf(Q)
+    np.testing.assert_allclose(s1, ref, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(s2, ref, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(s3, ref, rtol=1e-4, atol=1e-4)

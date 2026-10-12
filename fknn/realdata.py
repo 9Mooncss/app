@@ -66,7 +66,7 @@ def load_fashion(seed=0) -> RealDataset:
                        (xq / 255.0).astype(np.float32), yq.astype(np.int32))
 
 
-def load_glove(n_words=200_000) -> RealDataset:
+def load_glove(n_words=200_000, normalize=True) -> RealDataset:
     path = _get(GLOVE, "glove100.gz")
     vecs = np.empty((n_words, 100), dtype=np.float32)
     with gzip.open(path, "rt", encoding="utf8") as f:
@@ -80,19 +80,21 @@ def load_glove(n_words=200_000) -> RealDataset:
                 break
             vecs[i] = np.asarray(line.rstrip().split(" ")[1:], dtype=np.float32)
             i += 1
-    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12
+    if normalize:
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12
     rank = np.arange(n_words)
     bucket = (rank // 200).astype(np.int32)
     is_q = rank % 100 == 0
     return RealDataset("glove", vecs[~is_q], bucket[~is_q], n_words // 200, vecs[is_q], bucket[is_q])
 
 
-def load_spacy(seed=0) -> RealDataset:
+def load_spacy(seed=0, normalize=True) -> RealDataset:
     path = os.path.join(CACHE, "spacy_lg_vectors.npy")
     if not os.path.exists(path):
         raise FileNotFoundError("extract vocab/vectors from the en_core_web_lg-3.8.0 wheel into " + path)
     V = np.load(path).astype(np.float32)
-    V /= np.linalg.norm(V, axis=1, keepdims=True) + 1e-12
+    if normalize:
+        V /= np.linalg.norm(V, axis=1, keepdims=True) + 1e-12
     rng = np.random.default_rng(seed)
     is_q = np.zeros(len(V), bool)
     is_q[rng.choice(len(V), 2000, replace=False)] = True

@@ -547,3 +547,181 @@ void va3g_batch(const float *X, int d, int bits, const uint8_t *codesR /* [n][d]
     }
     free(tA); free(tB); free(T); free(blk);
 }
+
+/* ---------------------------------------------------------------------------------
+ * Exact top-k MAXIMUM INNER PRODUCT search with quantized UPPER bounds (AVX-512 VBMI).
+ * Per dimension i, a point's coordinate lies in cell c = [lo_ic, hi_ic] (finite: the
+ * outer cells end at the data min/max). Then q_i*x_i <= u_ic = max(q_i*lo_ic, q_i*hi_ic).
+ * Table: tab_ic = ceil((u_ic - off_i)/scale), off_i = min_c u_ic  (rounded UP -> still an
+ * upper bound). scale is chosen so that sum_i max_c tab_ic <= 65535 -> no saturation, so
+ *   UB(x) = sum_i off_i + scale * sum_i tab_i,code  >=  <q, x>   (exact upper bound).
+ * Refinement: exact dot for the k largest bounds, then for every point with UB > k-th best.
+ * rows are contiguous: codes [nb][d][64], n points (last block padded).
+ * ------------------------------------------------------------------------------- */
+static inline float dotf(const float *a, const float *b, int d) {
+    float s = 0.f;
+    for (int j = 0; j < d; j++) s += a[j] * b[j];
+    return s;
+}
+
+void mips_bf_batch(const float *X, int64_t n, int d, const float *Q, int nq, int k,
+                   int64_t *out_id, float *out_s, double *t_ns) {
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        topk_t tk; tk_init(&tk, k);
+        for (int64_t r = 0; r < n; r++) tk_push(&tk, -dotf(X + r * d, q, d), r);
+        t_ns[qi] = now_ns() - t0;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_s[qi * k + i] = i < tk.n ? -tk.d[i] : -INFINITY; }
+    }
+}
+
+void mips_va_batch(const float *X, int64_t n, int d, int bits, const uint8_t *codes, const float *cell_lo, const float *cell_hi,
+                   const float *Q, int nq, int k, int64_t *out_id, float *out_s, double *t_ns, int64_t *n_refined,
+                   uint16_t *ub_buf, int64_t *row_buf) {
+    const int C = 1 << bits, b7 = bits == 7;
+    const int64_t nb = (n + 63) / 64;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *U = malloc(sizeof(float) * d * C), *off = malloc(sizeof(float) * d), *rng = malloc(sizeof(float) * d);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        float sum_off = 0.f, sum_rng = 0.f, max_rng = 0.f;
+        for (int i = 0; i < d; i++) {
+            const __m512 vq = _mm512_set1_ps(q[i]);
+            __m512 vmin = _mm512_set1_ps(INFINITY), vmax = _mm512_set1_ps(-INFINITY);
+            for (int c = 0; c < C; c += 16) {
+                __m512 u = _mm512_max_ps(_mm512_mul_ps(vq, _mm512_loadu_ps(cell_lo + (int64_t)i * C + c)),
+                                         _mm512_mul_ps(vq, _mm512_loadu_ps(cell_hi + (int64_t)i * C + c)));
+                _mm512_storeu_ps(U + (int64_t)i * C + c, u);
+                vmin = _mm512_min_ps(vmin, u); vmax = _mm512_max_ps(vmax, u);
+            }
+            off[i] = _mm512_reduce_min_ps(vmin);
+            rng[i] = _mm512_reduce_max_ps(vmax) - off[i];
+            sum_off += off[i]; sum_rng += rng[i]; if (rng[i] > max_rng) max_rng = rng[i];
+        }
+        /* scale: every entry <= 255 and the worst-case sum <= 65535 (ceil adds < 1 per dim) */
+        float scale = fmaxf(max_rng / 254.f, sum_rng / (65535.f - d));
+        if (scale <= 0.f) scale = 1.f;
+        const float inv = 1.f / scale;
+        const __m512 vinv = _mm512_set1_ps(inv), v255 = _mm512_set1_ps(255.f);
+        for (int i = 0; i < d; i++) {
+            uint8_t row[128] __attribute__((aligned(64))) = {0};
+            const __m512 vo = _mm512_set1_ps(off[i]);
+            for (int c = 0; c < C; c += 16) {
+                __m512 v = _mm512_mul_ps(_mm512_sub_ps(_mm512_loadu_ps(U + (int64_t)i * C + c), vo), vinv);
+                v = _mm512_min_ps(_mm512_roundscale_ps(v, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC), v255);
+                _mm_storeu_si128((__m128i *)(row + c), _mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
+            }
+            if (C < 64) for (int c = C; c < 64; c++) row[c] = row[c % C];
+            tA[i] = _mm512_load_si512(row);
+            tB[i] = _mm512_load_si512(row + 64);
+        }
+        int64_t ns = 0;
+        for (int64_t b = 0; b < nb; b++) {
+            uint16_t ub64[64];
+            scan_block64_v3(codes + b * (int64_t)d * 64, tA, tB, d, b7, ub64);
+            int m = (int)((n - b * 64) < 64 ? (n - b * 64) : 64);
+            for (int j = 0; j < m; j++) { ub_buf[ns] = ub64[j]; row_buf[ns] = b * 64 + j; ns++; }
+        }
+        /* refine: k largest bounds first (histogram from the top), then all with UB > k-th best */
+        topk_t tk; tk_init(&tk, k);
+        int64_t refined = 0;
+        static int64_t hist[65536 >> 4];
+        memset(hist, 0, sizeof(hist));
+        for (int64_t s = 0; s < ns; s++) hist[ub_buf[s] >> 4]++;
+        int64_t acc = 0; int cut = (65536 >> 4) - 1;
+        for (; cut >= 0; cut--) { acc += hist[cut]; if (acc >= k) break; }
+        uint32_t lim = (uint32_t)(cut < 0 ? 0 : cut) << 4;
+        for (int64_t s = 0; s < ns; s++) if (ub_buf[s] >= lim) { tk_push(&tk, -dotf(X + row_buf[s] * d, q, d), row_buf[s]); refined++; row_buf[s] = -1; }
+        for (int64_t s = 0; s < ns; s++) {
+            if (row_buf[s] < 0) continue;
+            float ub = sum_off + (float)ub_buf[s] * scale;
+            if (tk.n == k && ub <= -tk_worst(&tk)) continue;      /* -worst = k-th best score */
+            tk_push(&tk, -dotf(X + row_buf[s] * d, q, d), row_buf[s]); refined++;
+        }
+        t_ns[qi] = now_ns() - t0;
+        n_refined[qi] = refined;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_s[qi * k + i] = i < tk.n ? -tk.d[i] : -INFINITY; }
+    }
+    free(tA); free(tB); free(U); free(off); free(rng);
+}
+
+/* Norm-ordered MIPS (rows sorted by decreasing norm; bnorm[b] = max norm in block b).
+ * Cauchy-Schwarz: <q,x> <= |q|*|x|, so once |q|*bnorm[b] <= k-th best, no later block can
+ * enter the top-k -> stop. mips_bfn_batch: brute force with that stop (LEMP-style baseline).
+ * mips_van_batch: VA bounds per block + streaming refinement + the same stop. Both exact. */
+void mips_bfn_batch(const float *X, int64_t n, int d, const float *norms, const float *Q, int nq, int k,
+                    int64_t *out_id, float *out_s, double *t_ns, int64_t *n_scanned) {
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        float qn = sqrtf(dotf(q, q, d));
+        topk_t tk; tk_init(&tk, k);
+        int64_t r = 0;
+        for (; r < n; r++) {
+            if (tk.n == k && qn * norms[r] <= -tk_worst(&tk)) break;
+            tk_push(&tk, -dotf(X + r * d, q, d), r);
+        }
+        t_ns[qi] = now_ns() - t0; n_scanned[qi] = r;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_s[qi * k + i] = i < tk.n ? -tk.d[i] : -INFINITY; }
+    }
+}
+
+void mips_van_batch(const float *X, int64_t n, int d, int bits, const uint8_t *codes, const float *cell_lo, const float *cell_hi,
+                    const float *bnorm, const float *Q, int nq, int k, int64_t *out_id, float *out_s, double *t_ns,
+                    int64_t *n_refined, int64_t *n_blocks) {
+    const int C = 1 << bits, b7 = bits == 7;
+    const int64_t nb = (n + 63) / 64;
+    __m512i *tA = aligned_alloc(64, sizeof(__m512i) * d), *tB = aligned_alloc(64, sizeof(__m512i) * d);
+    float *U = malloc(sizeof(float) * d * C), *off = malloc(sizeof(float) * d), *rng = malloc(sizeof(float) * d);
+    for (int qi = 0; qi < nq; qi++) {
+        const float *q = Q + (int64_t)qi * d;
+        double t0 = now_ns();
+        float qn = sqrtf(dotf(q, q, d));
+        float sum_off = 0.f, sum_rng = 0.f, max_rng = 0.f;
+        for (int i = 0; i < d; i++) {
+            const __m512 vq = _mm512_set1_ps(q[i]);
+            __m512 vmin = _mm512_set1_ps(INFINITY), vmax = _mm512_set1_ps(-INFINITY);
+            for (int c = 0; c < C; c += 16) {
+                __m512 u = _mm512_max_ps(_mm512_mul_ps(vq, _mm512_loadu_ps(cell_lo + (int64_t)i * C + c)),
+                                         _mm512_mul_ps(vq, _mm512_loadu_ps(cell_hi + (int64_t)i * C + c)));
+                _mm512_storeu_ps(U + (int64_t)i * C + c, u);
+                vmin = _mm512_min_ps(vmin, u); vmax = _mm512_max_ps(vmax, u);
+            }
+            off[i] = _mm512_reduce_min_ps(vmin); rng[i] = _mm512_reduce_max_ps(vmax) - off[i];
+            sum_off += off[i]; sum_rng += rng[i]; if (rng[i] > max_rng) max_rng = rng[i];
+        }
+        float scale = fmaxf(max_rng / 254.f, sum_rng / (65535.f - d));
+        if (scale <= 0.f) scale = 1.f;
+        const __m512 vinv = _mm512_set1_ps(1.f / scale), v255 = _mm512_set1_ps(255.f);
+        for (int i = 0; i < d; i++) {
+            uint8_t row[128] __attribute__((aligned(64))) = {0};
+            const __m512 vo = _mm512_set1_ps(off[i]);
+            for (int c = 0; c < C; c += 16) {
+                __m512 v = _mm512_mul_ps(_mm512_sub_ps(_mm512_loadu_ps(U + (int64_t)i * C + c), vo), vinv);
+                v = _mm512_min_ps(_mm512_roundscale_ps(v, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC), v255);
+                _mm_storeu_si128((__m128i *)(row + c), _mm512_cvtusepi32_epi8(_mm512_cvttps_epu32(v)));
+            }
+            if (C < 64) for (int c = C; c < 64; c++) row[c] = row[c % C];
+            tA[i] = _mm512_load_si512(row); tB[i] = _mm512_load_si512(row + 64);
+        }
+        topk_t tk; tk_init(&tk, k);
+        int64_t refined = 0, b = 0;
+        for (; b < nb; b++) {
+            if (tk.n == k && qn * bnorm[b] <= -tk_worst(&tk)) break;
+            uint16_t ub64[64];
+            scan_block64_v3(codes + b * (int64_t)d * 64, tA, tB, d, b7, ub64);
+            int m = (int)((n - b * 64) < 64 ? (n - b * 64) : 64);
+            for (int j = 0; j < m; j++) {
+                float ub = sum_off + (float)ub64[j] * scale;
+                if (tk.n == k && ub <= -tk_worst(&tk)) continue;
+                int64_t r = b * 64 + j;
+                tk_push(&tk, -dotf(X + r * d, q, d), r); refined++;
+            }
+        }
+        t_ns[qi] = now_ns() - t0; n_refined[qi] = refined; n_blocks[qi] = b;
+        for (int i = 0; i < k; i++) { out_id[qi * k + i] = i < tk.n ? tk.id[i] : -1; out_s[qi * k + i] = i < tk.n ? -tk.d[i] : -INFINITY; }
+    }
+    free(tA); free(tB); free(U); free(off); free(rng);
+}

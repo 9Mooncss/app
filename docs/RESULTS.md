@@ -361,3 +361,27 @@ keeping 2–3 code copies sorted by different attributes is affordable — a des
 * **Novelty:** the components are known (VA-file, multi-step k-NN, fast-scan LUTs, VBMI permutes);
   the specific combination for *exact filtered* search appears unpublished, but that is from a
   limited search — treat as an engineering contribution, not a theory.
+
+## Cycle 9 — transfer test: exact top-k maximum inner product search (MIPS)
+
+Motivation: move the bound-based exact top-k idea to markets with much larger compute spend
+(recommendation retrieval, attention key selection in LLM inference).
+Kernel (`fknn/mips.py`, `mips_*` in `fknn/c/fscan.c`): per-dimension cells with finite ends
+(data min/max), u_ic = max(q_i·lo, q_i·hi) is an upper bound of q_i·x_i; table rounded **up**,
+scale chosen so the uint16 sum cannot saturate → exact upper bound. Optional rows sorted by
+norm + Cauchy–Schwarz stop (LEMP-style). Exactness tested (`tests/test_correctness.py`).
+Pre-registered criterion: ≥ 2× over the best exact baseline, else close the direction.
+
+Experiment 15 (`results/exp15`, single thread, mean µs/query):
+| dataset | BF (C) | BLAS gemv (1 query) | BLAS gemm (batch 64, per query) | BF + norm stop | VA | VA + norm stop | vs best exact |
+|---|---|---|---|---|---|---|---|
+| GloVe raw 198k×100 | 9 690 | 4 477 | 1 834 | 7 352 | 1 592 | **1 324** | 1.39× |
+| spaCy raw 341k×300 | 57 471 | 37 566 | **4 654** | 66 684 | 14 045 | 17 324 | **0.33×** |
+| synth "recommendation" 1M×64 | 51 560 | 24 642 | 10 174 | 3 871 | 24 043 | **2 942** | 1.32× |
+| synth "attention keys" 300k×128 | 39 195 | 12 757 | 3 047 | 392 | 3 440 | **108** | 3.64× |
+(BLAS gemm timings varied up to ~2.5× between runs.)
+
+Verdict so far: **fails the 2× bar on real data.** Batched BLAS is very strong for MIPS; the
+single-query (online) case is better for VA (2.5–4× over gemv on GloVe/spaCy). The only pass is
+my own synthetic attention data, whose outlier channels I chose — not evidence. Next: real
+attention keys from a real transformer (RoBERTa weights inside spaCy en_core_web_trf, run in numpy).

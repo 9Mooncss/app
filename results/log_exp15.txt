@@ -1,0 +1,4 @@
+[glove_raw] n=198000 d=100 | BF-C 9690us | BLAS gemv 4477us | BLAS gemm/q 1834us | BF+norm-stop 7352us (scan 0.82) | VA 1592us | VA+norm-stop 1324us (blocks 0.82) | VA vs best exact 1.39x
+[spacy_raw] n=340918 d=300 | BF-C 57471us | BLAS gemv 37566us | BLAS gemm/q 4654us | BF+norm-stop 66684us (scan 0.99) | VA 14045us | VA+norm-stop 17324us (blocks 0.99) | VA vs best exact 0.33x
+[synth_rec_1M] n=1000000 d=64 | BF-C 51560us | BLAS gemv 24642us | BLAS gemm/q 10174us | BF+norm-stop 3871us (scan 0.14) | VA 24043us | VA+norm-stop 2942us (blocks 0.14) | VA vs best exact 1.32x
+[synth_attn_300k] n=300000 d=128 | BF-C 39195us | BLAS gemv 12757us | BLAS gemm/q 3047us | BF+norm-stop 392us (scan 0.02) | VA 3440us | VA+norm-stop 108us (blocks 0.02) | VA vs best exact 3.64x
